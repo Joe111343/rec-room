@@ -3,19 +3,30 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>P2P DEMO + 背包（顯示ID+頭轉修正）</title>
+<title>P2P + FPS/TPS + 背包 + 物品放置</title>
 <style>
-  body{margin:0;overflow:hidden;background:#111;color:#eee;font-family:system-ui,monospace}
-  #ui{position:fixed;left:12px;top:12px;background:rgba(0,0,0,0.7);padding:10px;border-radius:8px;z-index:30;max-width:360px}
-  #log{max-height:120px;overflow:auto;background:#0b0b0b;padding:6px;border-radius:6px;margin-top:8px;font-size:12px}
-  input, button{padding:6px;border-radius:6px;border:none}
-  button{background:#2196f3;color:white;cursor:pointer}
-  #inv { position: fixed; right: 12px; top: 12px; width: 300px; max-height: 70vh; overflow:auto;
-         background: rgba(0,0,0,0.6); padding:8px; border-radius:8px; display:none; z-index:30 }
-  #inv h3{ margin:6px 0 8px 0; font-size:14px }
-  .item{ display:flex; align-items:center; gap:8px; padding:6px; border-bottom:1px solid #222; cursor:pointer }
-  .item img{ width:36px; height:36px; object-fit:contain; border-radius:4px; background:#fff }
-  .hint{ color:#ccc; font-size:13px; margin-top:6px }
+  body { margin:0; overflow:hidden; background:#111; color:#eee; font-family: system-ui, monospace; }
+  #ui {
+    position: fixed; left: 12px; top: 12px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 8px; z-index: 30;
+    max-width: 360px;
+  }
+  #log { max-height:120px; overflow:auto; background:#0b0b0b; padding:6px; border-radius:6px; margin-top:8px; font-size:12px }
+  input, button { padding:6px; border-radius:6px; border:none }
+  button { background:#2196f3; color:white; cursor:pointer }
+  #inv {
+    position: fixed; right: 12px; top: 12px; width: 300px; max-height: 70vh; overflow:auto;
+    background: rgba(0,0,0,0.6); padding:8px; border-radius:8px; display:none; z-index: 30;
+  }
+  #inv h3 { margin:6px 0 8px 0; font-size:14px }
+  .item {
+    display:flex; align-items:center; gap:8px; padding:6px; border-bottom:1px solid #222; cursor:pointer;
+  }
+  .item img {
+    width:36px; height:36px; object-fit:contain; border-radius:4px; background:#fff;
+  }
+  .hint {
+    color:#ccc; font-size:13px; margin-top:6px;
+  }
   .remoteLabel {
     position: absolute;
     color: #ff0;
@@ -38,7 +49,11 @@
     </div>
     <div id="status" style="margin-top:8px">連線狀態：尚未連線</div>
     <div id="log"></div>
-    <div class="hint">點擊畫面啟用滑鼠與麥克風。WASD 移動，空白跳，Tab 打開背包，點擊物品放到場景。</div>
+    <div class="hint">
+      點擊畫面啟用滑鼠與麥克風。<br>
+      WASD 移動，空白跳，Tab 打開背包，點擊物品放到場景。<br>
+      1切第一人稱，3切第三人稱。
+    </div>
   </div>
 
   <div id="inv">
@@ -50,7 +65,7 @@
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
 
 <script>
-/* ================== UI helpers ================== */
+/* ======= UI & 日誌 ======= */
 const myIdEl = document.getElementById('myId');
 const inputEl = document.getElementById('inputId');
 const btnConnect = document.getElementById('btnConnect');
@@ -62,46 +77,38 @@ const invList = document.getElementById('invList');
 function log(t){ logEl.textContent += t + '\n'; logEl.scrollTop = logEl.scrollHeight; }
 function setStatus(s){ statusEl.textContent = '連線狀態：' + s; }
 
-/* ================== 讀取物品 JSON ================== */
-let itemsDB = {}; // key -> {name, desc, img}
-fetch('1.json')
-  .then(r => {
-    if(!r.ok) throw new Error('fetch 1.json failed: ' + r.status);
-    return r.json();
-  })
-  .then(data => {
-    itemsDB = data;
-    populateInventoryUI();
-    log('已讀取 1.json，背包載入完成');
-  })
-  .catch(e => {
-    invList.innerHTML = '<div style="color:#f66">讀取 1.json 失敗（請放同資料夾並在 HTTPS 或 localhost）</div>';
-    log('讀取 1.json 失敗: ' + e);
-  });
+/* ======= 讀取物品 JSON ======= */
+let itemsDB = {};
+fetch('1.json').then(r=>r.json()).then(data=>{
+  itemsDB = data;
+  populateInventoryUI();
+  log('已讀取 1.json，背包載入完成');
+}).catch(e=>{
+  invList.innerHTML = '<div style="color:#f66">讀取 1.json 失敗，請確認檔案存在及使用 HTTPS 或 localhost</div>';
+  log('讀取 1.json 失敗: ' + e);
+});
 
 function populateInventoryUI(){
   invList.innerHTML = '';
   const keys = Object.keys(itemsDB);
-  if(keys.length === 0){ invList.innerHTML = '<div>背包空空</div>'; return; }
+  if(keys.length===0){ invList.innerHTML = '<div>背包空空</div>'; return; }
   keys.forEach(k=>{
     const it = itemsDB[k];
     const div = document.createElement('div');
     div.className = 'item';
     div.dataset.key = k;
-    div.innerHTML = `<img src="${it.img}" alt="${it.name}"><div><strong>${it.name}</strong><div style="font-size:12px;color:#ccc">${it.desc}</div></div>`;
-    div.addEventListener('click', () => spawnItemInFront(k));
+    div.innerHTML = `<img src="${it.img}" alt="${it.name}"><div><strong>${it.name}</strong><br><small style="color:#ccc">${it.desc}</small></div>`;
+    div.addEventListener('click',()=>spawnItemInFront(k));
     invList.appendChild(div);
   });
 }
 
-/* ================== P2P setup (PeerJS) ================== */
-
-/* 產生 5 位 ID */
+/* ======= P2P (PeerJS) ======= */
 function gen5(){ return Math.floor(10000 + Math.random()*90000).toString(); }
 
-let peer = null, myId = null, conn = null, call = null, localStream = null;
-let isHost = true; // 預設第一個開的為房主（第一頁）
-let remoteId = null;
+let peer=null, myId=null, conn=null, call=null, localStream=null;
+let isHost=true;
+let remoteId=null;
 
 function setupPeer(id){
   peer = new Peer(id);
@@ -122,38 +129,41 @@ function setupPeer(id){
       });
     }
   });
-  peer.on('error', e => log('Peer error: ' + e));
+  peer.on('error', e=>log('Peer error: ' + e));
 }
 
 function setupDataConn(){
   conn.on('data', onDataReceived);
   conn.on('open', ()=>{ log('DataChannel open'); hideInputUI(); });
   conn.on('close', ()=>{ setStatus('連線已斷開'); log('DataChannel closed'); conn=null; call=null; showInputUI(); });
-  conn.on('error', e=> log('DataChannel error: ' + e));
+  conn.on('error', e=>log('DataChannel error: ' + e));
 }
 
 function setupCall(c){
   call = c;
-  call.on('stream', remoteStream => {
-    const a = new Audio(); a.srcObject = remoteStream; a.play().catch(()=>{});
+  call.on('stream', remoteStream=>{
+    const a = new Audio();
+    a.srcObject = remoteStream;
+    a.play().catch(()=>{});
     log('開始播放遠端語音'); setStatus('語音已連線');
   });
   call.on('close', ()=>{ log('call closed'); setStatus('語音中斷'); call=null; });
 }
 
-/* connect button */
 btnConnect.addEventListener('click', ()=>{
   inputEl.blur();
   startClientConnect();
 });
-inputEl.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); inputEl.blur(); startClientConnect(); } });
+inputEl.addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); inputEl.blur(); startClientConnect(); }
+});
 
 function startClientConnect(){
   if(conn){ log('已有連線'); return; }
   const target = inputEl.value.trim();
   if(!/^\d{5}$/.test(target)){ alert('請輸入 5 位數字 ID'); return; }
   if(!myId){ alert('尚未取得本機ID'); return; }
-  if(target === myId){ alert('不能連線自己 ID'); return; }
+  if(target===myId){ alert('不能連線自己 ID'); return; }
   log('嘗試連線到 ' + target);
   conn = peer.connect(target);
   remoteId = target;
@@ -166,20 +176,29 @@ function startClientConnect(){
     hideInputUI();
   });
   conn.on('data', onDataReceived);
-  conn.on('error', e=> log('conn err: '+e));
+  conn.on('error', e=>log('conn err: ' + e));
   conn.on('close', ()=>{ setStatus('連線已斷開'); conn=null; call=null; showInputUI(); });
 }
 
-/* hide/show input UI */
-function hideInputUI(){ inputEl.style.display='none'; btnConnect.style.display='none'; document.getElementById('ui').style.opacity = 0.8; invPane.style.display = 'block'; }
-function showInputUI(){ inputEl.style.display='inline-block'; btnConnect.style.display='inline-block'; invPane.style.display = 'none'; }
+function hideInputUI(){
+  inputEl.style.display = 'none';
+  btnConnect.style.display = 'none';
+  document.getElementById('ui').style.opacity = 0.8;
+  invPane.style.display = 'block';
+}
+function showInputUI(){
+  inputEl.style.display = 'inline-block';
+  btnConnect.style.display = 'inline-block';
+  invPane.style.display = 'none';
+}
 
-/* start peer as host with generated ID */
-const startId = gen5(); setupPeer(startId);
+const startId = gen5();
+setupPeer(startId);
 
-/* ================== three.js + gameplay ================== */
-const scene = new THREE.Scene(); scene.background = new THREE.Color(0x222244);
-const camera = new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,1000);
+/* ======= three.js & 遊戲 ======= */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x222244);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
@@ -190,7 +209,6 @@ window.addEventListener('resize', ()=>{
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-/* 簡易地板貼圖 */
 const loader = new THREE.TextureLoader();
 const floorTex = loader.load('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r155/examples/textures/checker.png');
 floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
@@ -203,7 +221,6 @@ floorMesh.rotation.x = -Math.PI/2;
 floorMesh.receiveShadow = true;
 scene.add(floorMesh);
 
-/* 簡易光 */
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
 scene.add(ambientLight);
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
@@ -230,15 +247,14 @@ const enemyMat = new THREE.MeshStandardMaterial({color:0xff3333});
 let remoteMesh = null;
 let remoteLabel = null;
 
-/* 背包物件放置 */
 let placedItems = [];
 
 function spawnItemInFront(key){
   if(!itemsDB[key]) return;
-  // 放在玩家面前約2m處
   const forward = new THREE.Vector3();
   camera.getWorldDirection(forward);
-  forward.y = 0; forward.normalize();
+  forward.y = 0;
+  forward.normalize();
   const pos = playerMesh.position.clone().add(forward.multiplyScalar(2));
   const it = itemsDB[key];
   const tex = loader.load(it.img);
@@ -257,11 +273,19 @@ document.addEventListener('keydown', e=>{
   if(e.code==='Tab'){
     e.preventDefault();
     invPane.style.display = invPane.style.display==='block' ? 'none' : 'block';
-  } else keys[e.code] = true;
+  } else if(e.code==='Digit1'){ // 第一人稱
+    cameraMode = 'first';
+    log('切換到第一人稱');
+  } else if(e.code==='Digit3'){ // 第三人稱
+    cameraMode = 'third';
+    log('切換到第三人稱');
+  } else {
+    keys[e.code] = true;
+  }
 });
 document.addEventListener('keyup', e=>{ keys[e.code] = false; });
 
-/* 點擊啟用滑鼠 */
+/* 點擊啟用滑鼠與麥克風 */
 renderer.domElement.addEventListener('click', ()=>{
   if(document.pointerLockElement !== renderer.domElement){
     renderer.domElement.requestPointerLock();
@@ -273,7 +297,7 @@ renderer.domElement.addEventListener('click', ()=>{
   }
 });
 
-/* FPS style look */
+/* 視角控制 */
 let pitch = 0, yaw = 0;
 document.addEventListener('mousemove', e=>{
   if(document.pointerLockElement === renderer.domElement){
@@ -283,19 +307,15 @@ document.addEventListener('mousemove', e=>{
   }
 });
 
-/* 玩家移動及物理 */
+/* 物理與移動 */
 let velocity = new THREE.Vector3();
 let pos = playerMesh.position;
 const clock = new THREE.Clock();
 
-function collideWithFloor(ypos){
-  if(ypos < playerHeight/2) return playerHeight/2;
-  return ypos;
-}
+let cameraMode = 'first'; // first / third
+let lastSent = 0;
 
-/* 簡單碰撞判斷(地板和放置物品) */
 function simpleCollision(pos){
-  // 目前只對放置物品做簡易方形碰撞
   const r = 0.3;
   for(let m of placedItems){
     if(Math.abs(pos.x - m.position.x)<r+0.25 &&
@@ -304,13 +324,10 @@ function simpleCollision(pos){
       return true;
     }
   }
-  // 碰地板
   if(pos.y < playerHeight/2) return true;
   return false;
 }
 
-/* 傳送與接收位置資料 */
-let lastSent = 0;
 function sendPosition(){
   if(!conn || conn.open===false) return;
   const now = performance.now();
@@ -321,7 +338,8 @@ function sendPosition(){
     x: playerMesh.position.x,
     y: playerMesh.position.y,
     z: playerMesh.position.z,
-    yaw: yaw
+    yaw: yaw,
+    pitch: pitch,
   }));
 }
 
@@ -329,6 +347,7 @@ let remote = {
   pos: new THREE.Vector3(),
   interp: new THREE.Vector3(),
   yaw: 0,
+  pitch: 0,
   last: 0
 };
 
@@ -338,6 +357,7 @@ function onDataReceived(raw){
   if(msg.t === 's'){
     remote.pos.set(msg.x, msg.y, msg.z);
     remote.yaw = msg.yaw;
+    remote.pitch = msg.pitch || 0;
     remote.last = performance.now();
     if(!remoteMesh){
       createRemotePlayer();
@@ -367,7 +387,6 @@ function updateLabelPosition(){
   remoteLabel.style.display = (vector.z < 1) ? 'block' : 'none';
 }
 
-/* 主迴圈 */
 function animate(){
   requestAnimationFrame(animate);
 
@@ -382,10 +401,28 @@ function animate(){
   if(keys['KeyD']) dir.x += 1;
   dir.normalize();
 
-  // 朝向 yaw，調整移動方向
+  // 移動方向計算：含 pitch 和 yaw
   if(dir.length()>0){
-    const moveDir = new THREE.Vector3(dir.x, 0, dir.z);
-    moveDir.applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
+    // 建立前方方向向量（含 pitch）
+    const forward = new THREE.Vector3(
+      Math.sin(yaw) * Math.cos(pitch),
+      0, // 垂直方向移動用跳躍，不用 pitch 垂直移動
+      Math.cos(yaw) * Math.cos(pitch)
+    ).normalize();
+
+    // 右方向量（忽略 pitch，保持水平）
+    const right = new THREE.Vector3(
+      Math.sin(yaw - Math.PI/2),
+      0,
+      Math.cos(yaw - Math.PI/2)
+    ).normalize();
+
+    // 移動向量
+    const moveDir = new THREE.Vector3();
+    moveDir.addScaledVector(forward, dir.z);
+    moveDir.addScaledVector(right, dir.x);
+    moveDir.normalize();
+
     velocity.x = moveDir.x * speed;
     velocity.z = moveDir.z * speed;
   } else {
@@ -395,7 +432,6 @@ function animate(){
 
   // 重力與跳躍
   velocityY += gravity * dt;
-
   if(onGround && keys['Space']){
     velocityY = jumpSpeed;
     onGround = false;
@@ -413,11 +449,9 @@ function animate(){
     onGround = true;
   }
 
-  // 簡易物品碰撞阻擋
-  // 先測試 XZ 平面，避免穿透
+  // 簡易物品碰撞阻擋 XZ平面
   let testPos = new THREE.Vector3(pos.x, playerHeight/2, pos.z);
   if(simpleCollision(testPos)){
-    // 撞到物品，退回前一位置
     pos.x -= velocity.x * dt;
     pos.z -= velocity.z * dt;
   }
@@ -427,19 +461,38 @@ function animate(){
   // 玩家模型面向 yaw
   playerMesh.rotation.y = yaw;
 
-  // 攝影機跟隨玩家眼睛位置
-  const camHeight = playerHeight - 0.3;
-  camera.position.set(pos.x, pos.y + camHeight, pos.z);
-  const lookDir = new THREE.Vector3();
-  camera.getWorldDirection(lookDir);
-  let target = new THREE.Vector3();
-  target.copy(pos);
-  target.y += camHeight;
-  target.x += Math.sin(yaw);
-  target.z += Math.cos(yaw);
-  camera.lookAt(target);
+  // 攝影機視角更新
+  if(cameraMode === 'first'){
+    // 第一人稱：相機在玩家頭頂位置，視角 pitch, yaw
+    const camHeight = playerHeight - 0.3;
+    camera.position.set(pos.x, pos.y + camHeight, pos.z);
 
-  // 更新遠端玩家位置及方向
+    // 方向向量（含 pitch, yaw）
+    const lookDir = new THREE.Vector3(
+      Math.sin(yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(yaw) * Math.cos(pitch)
+    );
+    const lookTarget = camera.position.clone().add(lookDir);
+    camera.lookAt(lookTarget);
+
+  } else {
+    // 第三人稱：相機跟隨玩家身後並略微向上看
+    const offsetBack = 3;
+    const offsetUp = 1.5;
+    const camPos = new THREE.Vector3(
+      pos.x - Math.sin(yaw) * offsetBack,
+      pos.y + offsetUp,
+      pos.z - Math.cos(yaw) * offsetBack
+    );
+    camera.position.copy(camPos);
+
+    const lookTarget = pos.clone();
+    lookTarget.y += playerHeight*0.75;
+    camera.lookAt(lookTarget);
+  }
+
+  // 遠端玩家位置與方向插值
   if(remoteMesh){
     remote.interp.lerp(remote.pos, 0.15);
     remoteMesh.position.copy(remote.interp);
@@ -448,13 +501,10 @@ function animate(){
   }
 
   sendPosition();
-
   renderer.render(scene, camera);
 }
 
 animate();
-
 </script>
-
 </body>
 </html>
