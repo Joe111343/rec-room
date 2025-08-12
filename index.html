@@ -3,31 +3,43 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>第一個進來當房主 P2P 自動連線示範</title>
+<title>P2P 雙人房主/連線 ID 輸入示範</title>
 <style>
   body { margin:0; overflow:hidden; background:#222; color:#eee; font-family: monospace; }
   #ui {
     position: fixed; top: 10px; left: 10px;
     background: rgba(0,0,0,0.7);
-    padding: 10px; border-radius: 5px; max-width: 300px;
+    padding: 10px; border-radius: 5px; max-width: 320px;
     z-index: 10;
   }
   #log {
     max-height: 100px; overflow-y: auto; margin-top: 10px; font-size: 12px;
     background: #111; padding: 5px; border-radius: 3px;
   }
+  input[type=text] {
+    font-size: 14px; padding: 4px; width: 100px;
+    border-radius: 3px; border: none; outline:none;
+  }
+  button {
+    font-size: 14px; padding: 4px 10px; border-radius: 3px;
+    border:none; cursor:pointer; margin-left: 8px;
+  }
 </style>
 </head>
 <body>
 
 <div id="ui">
-  <div>你的ID：<span id="myId">...</span></div>
+  <div>你的ID（5位數）：<span id="myId">...</span></div>
+  <div>
+    連線到ID：<input type="text" id="inputId" maxlength="5" placeholder="輸入5位ID" />
+    <button id="btnConnect">連線</button>
+  </div>
   <div id="status">連線狀態：尚未連線</div>
   <div id="log"></div>
   <div style="margin-top:8px; font-size:14px;">
     WASD移動，滑鼠看視角，空白跳<br>
-    點擊畫面啟用滑鼠控制<br>
-    第一個進來自動當房主，語音+位置同步
+    點擊畫面啟用滑鼠控制與麥克風<br>
+    先開一個頁面成為房主，另一個輸入ID連線
   </div>
 </div>
 
@@ -35,10 +47,12 @@
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
 
 <script>
-  // --- UI 及 log ---
   const logElem = document.getElementById('log');
   const myIdSpan = document.getElementById('myId');
   const statusDiv = document.getElementById('status');
+  const inputId = document.getElementById('inputId');
+  const btnConnect = document.getElementById('btnConnect');
+
   function log(text){
     logElem.textContent += text + '\n';
     logElem.scrollTop = logElem.scrollHeight;
@@ -47,90 +61,58 @@
     statusDiv.textContent = '連線狀態：' + text;
   }
 
-  // --- P2P 自動配對設定 ---
-  const ROOM_ID = 'myroom12345678'; // 固定房間ID，自己改
+  // 產生 5 位數 ID (字串)
+  function gen5DigitId(){
+    return Math.floor(10000 + Math.random()*90000).toString();
+  }
 
-  let isHost = false;
+  let peer = null;
+  let myId = null;
   let conn = null;
   let call = null;
   let localStream = null;
 
-  const peer = new Peer();
+  let isHost = false;
 
-  peer.on('open', async (id) => {
-    myIdSpan.textContent = id;
-    log('Peer ID: ' + id);
+  function setupPeer(id){
+    peer = new Peer(id);
 
-    // 嘗試連線房主
-    let connectSucceeded = false;
+    peer.on('open', id => {
+      myId = id;
+      myIdSpan.textContent = id;
+      log('Peer 開啟，ID: ' + id);
+      setStatus('等待連線或輸入對方ID連線');
 
-    try {
-      conn = peer.connect(ROOM_ID);
-      await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject('timeout'), 3000);
-        conn.on('open', () => {
-          clearTimeout(timeout);
-          connectSucceeded = true;
-          resolve();
+      // 如果是房主，監聽連線與來電
+      if(isHost){
+        peer.on('connection', c => {
+          if(conn){
+            c.close();
+            log('已有連線，拒絕新連線');
+            return;
+          }
+          conn = c;
+          setupDataConn();
+          setStatus('房主已連線');
+          log('房主接收到連線');
         });
-        conn.on('error', reject);
-      });
-    } catch (e) {
-      log('無法連接房主，自己當房主');
-      isHost = true;
-      setStatus('你是房主，等待連線...');
-      setupHost();
-      return;
-    }
 
-    if(connectSucceeded){
-      setStatus('已連線房主');
-      setupClient();
-    }
-  });
-
-  peer.on('error', e => log('Peer 錯誤: ' + e));
-
-  function setupHost(){
-    peer.on('connection', connection => {
-      if(conn){
-        connection.close();
-        log('已有連線，拒絕新連線');
-        return;
+        peer.on('call', incomingCall => {
+          navigator.mediaDevices.getUserMedia({audio:true})
+          .then(stream => {
+            localStream = stream;
+            incomingCall.answer(stream);
+            setupCall(incomingCall);
+          })
+          .catch(e => {
+            log('取得麥克風失敗：' + e);
+            setStatus('取得麥克風失敗');
+          });
+        });
       }
-      conn = connection;
-      setupDataConn();
-      setStatus('房主已連線');
-      log('房主接收到連線');
     });
 
-    peer.on('call', incomingCall => {
-      navigator.mediaDevices.getUserMedia({audio:true})
-      .then(stream => {
-        localStream = stream;
-        incomingCall.answer(stream);
-        setupCall(incomingCall);
-      })
-      .catch(e => {
-        log('取得麥克風失敗：' + e);
-        setStatus('取得麥克風失敗');
-      });
-    });
-  }
-
-  function setupClient(){
-    setupDataConn();
-
-    navigator.mediaDevices.getUserMedia({audio:true})
-    .then(stream => {
-      localStream = stream;
-      call = peer.call(ROOM_ID, stream);
-      setupCall(call);
-    })
-    .catch(e => {
-      log('取得麥克風失敗：' + e);
-      setStatus('取得麥克風失敗');
-    });
+    peer.on('error', e => log('Peer 錯誤: ' + e));
   }
 
   function setupDataConn(){
@@ -159,7 +141,69 @@
     });
   }
 
-  // --- three.js 場景設定 ---
+  // 按鈕事件，開始當房主或連線
+  btnConnect.onclick = () => {
+    if(conn){
+      log('已連線，請刷新頁面重試');
+      return;
+    }
+
+    const targetId = inputId.value.trim();
+    if(!/^\d{5}$/.test(targetId)){
+      alert('請輸入5位數數字ID');
+      return;
+    }
+
+    // 如果輸入ID等於自己ID，自己是房主
+    if(targetId === myId){
+      alert('不能連線自己ID，這是你的ID');
+      return;
+    }
+
+    if(!myId){
+      alert('尚未取得本機ID，請稍候');
+      return;
+    }
+
+    log('嘗試連線到 ID: ' + targetId);
+
+    // 當客戶端，連線到目標ID
+    conn = peer.connect(targetId);
+
+    conn.on('open', () => {
+      setStatus('已連線至 ' + targetId);
+      log('連線成功');
+      // 啟用麥克風，開始語音通話
+      navigator.mediaDevices.getUserMedia({audio:true})
+      .then(stream => {
+        localStream = stream;
+        call = peer.call(targetId, stream);
+        setupCall(call);
+      })
+      .catch(e => {
+        log('取得麥克風失敗：' + e);
+        setStatus('取得麥克風失敗');
+      });
+    });
+
+    conn.on('data', onDataReceived);
+
+    conn.on('error', e => log('連線錯誤：' + e));
+    conn.on('close', () => {
+      setStatus('連線已斷開');
+      log('DataChannel關閉');
+      conn = null;
+      call = null;
+    });
+  };
+
+  // 預先產生ID並初始化Peer，視為房主，等待他人連線
+  isHost = true;
+  const myGeneratedId = gen5DigitId();
+  setupPeer(myGeneratedId);
+
+  // --- 以下與前面相同，three.js 場景與控制 ---
+
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x333333);
 
@@ -177,7 +221,6 @@
   dirLight.position.set(5, 10, 7);
   scene.add(dirLight);
 
-  // 地板
   const floorGeo = new THREE.PlaneGeometry(50,50);
   const floorMat = new THREE.MeshStandardMaterial({color:0x555555});
   const floorMesh = new THREE.Mesh(floorGeo, floorMat);
@@ -185,7 +228,6 @@
   floorMesh.receiveShadow = true;
   scene.add(floorMesh);
 
-  // 牆壁碰撞盒陣列
   const walls = [];
 
   function createWall(x,y,z,w,h,d){
@@ -197,7 +239,6 @@
     mesh.receiveShadow = true;
     scene.add(mesh);
 
-    // 建立碰撞盒
     const box = new THREE.Box3().setFromObject(mesh);
     walls.push(box);
     return mesh;
@@ -208,20 +249,16 @@
   createWall(-25,2.5,0, 1,5,50);
   createWall(25,2.5,0, 1,5,50);
 
-  // 玩家幾何體
   const playerGeo = new THREE.BoxGeometry(0.8,1.7,0.8);
 
-  // 貼圖載入器
   const loader = new THREE.TextureLoader();
 
-  // 玩家與對手貼圖網址（可換成你想的貼圖）
-  const playerTextureURL = 'https://i.imgur.com/WLVaWVa.png'; // 綠色角色貼圖
-  const enemyTextureURL = 'https://i.imgur.com/s8PUpct.png';  // 紅色角色貼圖
+  const playerTextureURL = 'https://i.imgur.com/WLVaWVa.png';
+  const enemyTextureURL = 'https://i.imgur.com/s8PUpct.png';
 
   const playerTex = loader.load(playerTextureURL);
   const enemyTex = loader.load(enemyTextureURL);
 
-  // 玩家材質貼圖
   const playerMat = new THREE.MeshStandardMaterial({map: playerTex});
   const enemyMat = new THREE.MeshStandardMaterial({map: enemyTex});
 
@@ -231,7 +268,6 @@
   const enemyMesh = new THREE.Mesh(playerGeo, enemyMat);
   scene.add(enemyMesh);
 
-  // 玩家資料
   const player = {
     pos: new THREE.Vector3(0,0.85,0),
     vel: new THREE.Vector3(0,0,0),
@@ -246,12 +282,10 @@
     pitch: 0,
   };
 
-  // 鍵盤控制
   const keys = {};
   window.addEventListener('keydown', e => { keys[e.code] = true; });
   window.addEventListener('keyup', e => { keys[e.code] = false; });
 
-  // 滑鼠視角控制
   function onMouseMove(e){
     player.yaw -= e.movementX * 0.002;
     player.pitch -= e.movementY * 0.002;
@@ -267,7 +301,6 @@
     }
   });
 
-  // 玩家碰撞盒 (AABB)
   function getPlayerBox(pos){
     const halfWidth = 0.4;
     return new THREE.Box3(
@@ -276,7 +309,6 @@
     );
   }
 
-  // 碰撞偵測，回傳是否撞牆
   function checkCollision(newPos){
     const pBox = getPlayerBox(newPos);
     for(let wallBox of walls){
@@ -287,7 +319,6 @@
     return false;
   }
 
-  // 玩家嘗試移動
   function tryMove(dx, dy, dz){
     const newPos = player.pos.clone().add(new THREE.Vector3(dx, dy, dz));
     if(!checkCollision(newPos)){
@@ -296,7 +327,6 @@
     }
   }
 
-  // 移動速度與跳躍
   const moveSpeed = 5;
   const jumpVelocity = 6;
   const gravity = -9.8;
@@ -308,7 +338,6 @@
     }
   }
 
-  // 接收對方資料，更新對手位置與視角
   function onDataReceived(data){
     if(data.pos){
       enemy.pos.set(data.pos.x, data.pos.y, data.pos.z);
@@ -318,7 +347,6 @@
     if(data.pitch !== undefined) enemy.pitch = data.pitch;
   }
 
-  // 傳送玩家狀態給對方
   function sendPlayerState(){
     if(conn && conn.open){
       conn.send({
@@ -331,7 +359,6 @@
 
   let lastTime = performance.now();
 
-  // 主迴圈
   function animate(){
     requestAnimationFrame(animate);
 
@@ -339,7 +366,6 @@
     let delta = (now - lastTime)/1000;
     lastTime = now;
 
-    // 玩家移動計算
     let moveX = 0, moveZ = 0;
     if(keys['KeyW']) moveZ -= 1;
     if(keys['KeyS']) moveZ += 1;
@@ -349,7 +375,7 @@
     let moveDir = new THREE.Vector3();
     if(moveX !== 0 || moveZ !== 0){
       moveDir.set(moveX, 0, moveZ).normalize();
-      // 轉換成世界座標方向
+
       const forward = new THREE.Vector3(Math.sin(player.yaw), 0, Math.cos(player.yaw));
       const right = new THREE.Vector3(Math.sin(player.yaw + Math.PI/2), 0, Math.cos(player.yaw + Math.PI/2));
 
@@ -361,22 +387,18 @@
       tryMove(worldMove.x, 0, worldMove.z);
     }
 
-    // 跳躍
     if(keys['Space']){
       tryJump();
     }
 
-    // 重力
     player.vel.y += gravity * delta;
     const newY = player.pos.y + player.vel.y * delta;
 
-    // 地面高度 0.85 (玩家腳底+0.85=0，玩家高度1.7)
     if(newY < 0.85){
       player.vel.y = 0;
       player.pos.y = 0.85;
       player.grounded = true;
     } else {
-      // 試著往上移動，看有沒有碰撞
       const testPos = player.pos.clone();
       testPos.y = newY;
       if(!checkCollision(testPos)){
@@ -387,18 +409,13 @@
       player.grounded = false;
     }
 
-    // 更新玩家mesh位置
     playerMesh.position.copy(player.pos);
 
-    // 更新攝影機位置與視角
     camera.position.copy(player.pos).add(new THREE.Vector3(0,0.6,0));
     camera.rotation.order = 'YXZ';
     camera.rotation.y = player.yaw;
     camera.rotation.x = player.pitch;
 
-    // 對手 mesh 位置已由資料更新
-
-    // 傳送狀態頻率限制 (30fps)
     if(now - (sendPlayerState.lastSend||0) > 33){
       sendPlayerState();
       sendPlayerState.lastSend = now;
@@ -409,8 +426,7 @@
 
   animate();
 
-  // --- 音訊自動啟用 ---
-  // 在使用者點擊畫面啟用麥克風與P2P連線 (避免瀏覽器自動阻擋)
+  // 啟用麥克風在點擊時
   document.body.addEventListener('click', () => {
     if(localStream) return;
     navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
