@@ -242,7 +242,7 @@
         player.pitch = Math.min(pitchLimit, Math.max(-pitchLimit, player.pitch));
 
         let forward = new THREE.Vector3(Math.sin(player.yaw),0,Math.cos(player.yaw));
-        let right = new THREE.Vector3(Math.sin(player.yaw - Math.PI/2),0,Math.cos(player.yaw - Math.PI/2));
+        let right = new THREE.Vector3(Math.sin(player.yaw + Math.PI/2),0,Math.cos(player.yaw + Math.PI/2));
 
         let moveDir = new THREE.Vector3();
         moveDir.addScaledVector(forward, -ly);
@@ -270,7 +270,7 @@
     if(moveVec.length() > 0){
       moveVec.normalize();
       let forward = new THREE.Vector3(Math.sin(player.yaw),0,Math.cos(player.yaw));
-      let right = new THREE.Vector3(Math.sin(player.yaw - Math.PI/2),0,Math.cos(player.yaw - Math.PI/2));
+      let right = new THREE.Vector3(Math.sin(player.yaw + Math.PI/2),0,Math.cos(player.yaw + Math.PI/2));
       let moveDir = new THREE.Vector3();
       moveDir.addScaledVector(forward, moveVec.z);
       moveDir.addScaledVector(right, moveVec.x);
