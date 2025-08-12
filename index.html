@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>P2P 雙人第一人稱遊戲（貼圖＋碰撞）</title>
+<title>P2P 雙人第一人稱遊戲（貼圖＋碰撞）修正版</title>
 <style>
   body { margin:0; overflow:hidden; background:#222; color:#eee; font-family: monospace; }
   #ui {
@@ -284,7 +284,12 @@
   };
 
   const keys = {};
-  window.addEventListener('keydown', e => { keys[e.code] = true; });
+  window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) {
+      e.preventDefault();
+    }
+  });
   window.addEventListener('keyup', e => { keys[e.code] = false; });
 
   function onMouseMove(e){
@@ -293,9 +298,23 @@
     const pitchLimit = Math.PI/2 - 0.1;
     player.pitch = Math.min(pitchLimit, Math.max(-pitchLimit, player.pitch));
   }
-  document.body.addEventListener('click', ()=>document.body.requestPointerLock());
-  document.addEventListener('pointerlockchange', ()=>{
-    if(document.pointerLockElement === document.body){
+
+  document.body.addEventListener('click', () => {
+    if(document.pointerLockElement !== document.body){
+      document.body.requestPointerLock();
+    }
+    if(!localStream){
+      navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+        localStream = stream;
+        log('麥克風已啟用');
+      }).catch(e=>{
+        log('麥克風啟用失敗：' + e);
+      });
+    }
+  });
+
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement === document.body) {
       document.addEventListener('mousemove', onMouseMove);
     } else {
       document.removeEventListener('mousemove', onMouseMove);
@@ -317,7 +336,7 @@
         return true;
       }
     }
-    // 玩家之間碰撞判斷
+    // 玩家互撞
     const enemyBox = getPlayerBox(enemy.pos);
     if(pBox.intersectsBox(enemyBox)){
       return true;
@@ -382,8 +401,9 @@
     if(moveX !== 0 || moveZ !== 0){
       moveDir.set(moveX, 0, moveZ).normalize();
 
-      const forward = new THREE.Vector3(Math.sin(player.yaw), 0, Math.cos(player.yaw));
-      const right = new THREE.Vector3(Math.sin(player.yaw + Math.PI/2), 0, Math.cos(player.yaw + Math.PI/2));
+      // 修正前進方向：前是負Z軸
+      const forward = new THREE.Vector3(Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+      const right = new THREE.Vector3(Math.sin(player.yaw + Math.PI/2), 0, -Math.cos(player.yaw + Math.PI/2));
 
       const worldMove = new THREE.Vector3();
       worldMove.addScaledVector(forward, moveDir.z);
@@ -431,16 +451,6 @@
   }
 
   animate();
-
-  document.body.addEventListener('click', () => {
-    if(localStream) return;
-    navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
-      localStream = stream;
-      log('麥克風已啟用');
-    }).catch(e=>{
-      log('麥克風啟用失敗：' + e);
-    });
-  });
 </script>
 
 </body>
