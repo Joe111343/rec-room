@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>3D P2P雙人表情同步示範</title>
+<title>3D P2P雙人表情同步示範 (ES Module版)</title>
 <style>
   body { margin:0; overflow:hidden; background:#222; color:#eee; font-family: monospace; }
   #peerID {
@@ -37,11 +37,11 @@
   <div id="connStatus"></div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/loaders/GLTFLoader.js"></script>
+<script type="module">
+  import Peer from 'https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.esm.min.js';
+  import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.module.js';
+  import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.150.1/examples/jsm/loaders/GLTFLoader.js';
 
-<script>
   // PeerJS 5位ID產生器
   function generateRandomID() {
     return Math.floor(10000 + Math.random() * 90000).toString();
@@ -77,6 +77,7 @@
 
   function bindConnection(){
     document.getElementById('connStatus').textContent = '已連線: ' + conn.peer;
+    if(remoteModel) remoteModel.visible = true;
     conn.on('data', data => {
       if(!remoteModel) return;
       if(data.type === 'posRot'){
@@ -103,6 +104,7 @@
     conn = peer.connect(targetID);
     conn.on('open', () => {
       document.getElementById('connStatus').textContent = '已連線: ' + conn.peer;
+      if(remoteModel) remoteModel.visible = true;
     });
     conn.on('data', data => {
       if(!remoteModel) return;
@@ -217,7 +219,7 @@
   // 載入外部GLTF模型函式（LittlestTokyo）
   function loadModel(){
     return new Promise((resolve, reject) => {
-      const loader = new THREE.GLTFLoader();
+      const loader = new GLTFLoader();
       loader.load(
         'https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/models/gltf/LittlestTokyo/LittlestTokyo.glb',
         gltf => resolve(gltf),
