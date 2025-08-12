@@ -3,328 +3,372 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>3D P2P雙人表情同步示範</title>
+<title>自由跳躍遊戲 + P2P短ID連線</title>
 <style>
-  body { margin:0; overflow:hidden; background:#222; color:#eee; font-family: monospace; }
-  #peerID {
-    position: fixed; top: 5px; right: 5px; background: rgba(0,0,0,0.5);
-    padding: 6px 10px; border-radius: 6px; z-index: 10;
+  body { margin: 0; overflow: hidden; background: #222; color: white; font-family: sans-serif;}
+  #info {
+    position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px;
+    z-index: 10;
   }
-  #connectSection {
-    position: fixed; top: 50px; right: 5px; background: rgba(0,0,0,0.8);
-    padding: 10px; border-radius: 6px; z-index: 10;
+  #connectUI {
+    position: absolute; top: 70px; left: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px;
+    z-index: 10;
   }
-  #connectSection input {
-    width: 140px; padding: 6px; border-radius: 4px; border:none; outline:none;
-    font-size: 14px;
-  }
-  #connectSection button {
-    padding: 6px 12px; margin-left: 6px; border:none; border-radius: 4px;
-    cursor: pointer; background:#0a74da; color:#fff; font-weight: bold;
-  }
-  #connStatus {
-    margin-top: 6px; font-size: 13px; color: #0f0;
+  #interactPrompt {
+    position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%);
+    color: white; background: rgba(0,0,0,0.5); padding: 10px 20px; border-radius: 8px; display: none;
+    font-size: 20px;
   }
 </style>
 </head>
 <body>
+<div id="info">用 WASD 移動，空白跳躍，靠近箱子按 E 互動，點擊畫面開始</div>
 
-<div id="peerID">ID 載入中...</div>
-
-<div id="connectSection">
-  <input id="connectInput" placeholder="輸入對方ID連線" />
+<div id="connectUI">
+  <div>你的ID：<span id="myId">...</span></div>
+  <input id="connectIdInput" type="text" maxlength="4" placeholder="輸入對方4位數ID" style="width:130px;" />
   <button id="connectBtn">連線</button>
-  <div id="connStatus"></div>
+  <div id="status">未連線</div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+<div id="interactPrompt">按 E 互動</div>
+
 <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/controls/PointerLockControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
 
 <script>
-  // 產生5位數ID
-  function generateRandomID() {
-    return Math.floor(10000 + Math.random() * 90000).toString();
-  }
-
-  let peer, conn;
-  let scene, camera, renderer, clock;
-  let mixer, model, remoteModel;
-  let morphCount = 0;
-  let morphIndex = 0;
-  let remoteMorphIndex = 0;
-  let keys = {};
-  let yaw = 0, pitch = 0;
+  // --- Three.js 基本場景 & 控制 ---
+  let scene, camera, renderer, controls;
+  let objects = [];
+  let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
   let velocity = new THREE.Vector3();
-  let speed = 5;
+  let direction = new THREE.Vector3();
+  let prevTime = performance.now();
+  let canJump = true;
 
-  function setupPeer(){
-    const myId = generateRandomID();
-    peer = new Peer(myId, {
-      host: 'peerjs.com',
-      port: 443,
-      secure: true,
-      debug: 2
-    });
+  // 互動提示
+  const interactPrompt = document.getElementById('interactPrompt');
+  let currentInteractObject = null;
 
-    peer.on('open', id => {
-      console.log('Peer opened with ID:', id);
-      document.getElementById('peerID').textContent = '我的ID: ' + id;
-    });
+  // 其他玩家用簡單圓球表示
+  let otherPlayerMesh = null;
 
-    peer.on('error', err => {
-      console.error('PeerJS error:', err);
-      document.getElementById('peerID').textContent = '連線錯誤，請稍後重試';
-    });
+  init();
+  animate();
 
-    peer.on('disconnected', () => {
-      console.warn('Peer disconnected');
-      document.getElementById('peerID').textContent = '已斷線，嘗試重新連線...';
-      peer.reconnect();
-    });
-
-    peer.on('close', () => {
-      console.warn('Peer connection關閉');
-      document.getElementById('peerID').textContent = '連線已關閉';
-    });
-
-    peer.on('connection', c => {
-      if(conn){
-        c.close();
-        return;
-      }
-      conn = c;
-      bindConnection();
-    });
-  }
-
-  function bindConnection(){
-    document.getElementById('connStatus').textContent = '已連線: ' + conn.peer;
-    if(remoteModel) remoteModel.visible = true;
-
-    conn.on('data', data => {
-      if(!remoteModel) return;
-      if(data.type === 'posRot'){
-        remoteModel.position.set(data.pos.x, data.pos.y, data.pos.z);
-        remoteModel.rotation.y = data.rotY;
-      } else if(data.type === 'morph'){
-        remoteMorphIndex = data.morphIndex;
-        updateMorphTargets(remoteModel, remoteMorphIndex);
-      }
-    });
-
-    conn.on('close', () => {
-      document.getElementById('connStatus').textContent = '連線已斷開';
-      if(remoteModel) remoteModel.visible = false;
-    });
-  }
-
-  document.getElementById('connectBtn').onclick = () => {
-    if(conn) conn.close();
-    const targetID = document.getElementById('connectInput').value.trim();
-    if(!targetID){
-      alert('請輸入對方ID');
-      return;
-    }
-    conn = peer.connect(targetID);
-    conn.on('open', () => {
-      document.getElementById('connStatus').textContent = '已連線: ' + conn.peer;
-      if(remoteModel) remoteModel.visible = true;
-    });
-    conn.on('data', data => {
-      if(!remoteModel) return;
-      if(data.type === 'posRot'){
-        remoteModel.position.set(data.pos.x, data.pos.y, data.pos.z);
-        remoteModel.rotation.y = data.rotY;
-      } else if(data.type === 'morph'){
-        remoteMorphIndex = data.morphIndex;
-        updateMorphTargets(remoteModel, remoteMorphIndex);
-      }
-    });
-    conn.on('close', () => {
-      document.getElementById('connStatus').textContent = '連線已斷開';
-      if(remoteModel) remoteModel.visible = false;
-    });
-  };
-
-  function initThree(){
+  function init() {
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x222222);
+    scene.background = new THREE.Color(0xa0a0a0);
 
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 1.6, 3);
+    // 燈光
+    const light = new THREE.HemisphereLight(0xffffff, 0x444444);
+    light.position.set(0, 200, 0);
+    scene.add(light);
 
-    renderer = new THREE.WebGLRenderer({antialias:true});
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-
-    const ambientLight = new THREE.AmbientLight(0x666666);
-    scene.add(ambientLight);
-
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(10, 20, 10);
+    const dirLight = new THREE.DirectionalLight(0xffffff);
+    dirLight.position.set(0, 200, 100);
+    dirLight.castShadow = true;
     scene.add(dirLight);
 
+    // 相機
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 1, 1000);
+
+    // 控制器
+    controls = new THREE.PointerLockControls(camera, document.body);
+
+    document.body.addEventListener('click', () => {
+      controls.lock();
+    });
+
+    controls.addEventListener('lock', () => {
+      document.getElementById('info').style.display = 'none';
+    });
+
+    controls.addEventListener('unlock', () => {
+      document.getElementById('info').style.display = '';
+    });
+
+    scene.add(controls.getObject());
+
     // 地板
-    const floorGeo = new THREE.PlaneGeometry(50, 50);
-    const floorMat = new THREE.MeshPhongMaterial({color: 0x444444});
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
+    const floorTexture = new THREE.TextureLoader().load('https://threejs.org/examples/textures/grasslight-big.jpg');
+    floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
+    floorTexture.repeat.set(25, 25);
+
+    const floorMaterial = new THREE.MeshPhongMaterial({ map: floorTexture });
+    const floorGeometry = new THREE.PlaneGeometry(500, 500);
+    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+    floor.rotation.x = - Math.PI / 2;
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // 玩家（自己）
-    loadModel().then(gltf => {
-      model = gltf.scene;
-      model.position.set(0, 0, 0);
-      scene.add(model);
+    // 牆壁
+    const wallTexture = new THREE.TextureLoader().load('https://threejs.org/examples/textures/brick_diffuse.jpg');
+    wallTexture.wrapS = wallTexture.wrapT = THREE.RepeatWrapping;
+    wallTexture.repeat.set(10, 2);
+    const wallMaterial = new THREE.MeshPhongMaterial({ map: wallTexture });
 
-      morphCount = 0;
-      model.traverse(child => {
-        if(child.isMesh){
-          morphCount = child.morphTargetInfluences.length;
-          child.morphTargetInfluences = child.morphTargetInfluences || [];
-        }
-      });
+    const wallThickness = 2;
+    const wallHeight = 20;
+    const wallLength = 100;
 
-      mixer = new THREE.AnimationMixer(model);
-      updateMorphTargets(model, morphIndex);
-    });
-
-    // 遠端玩家
-    loadModel().then(gltf => {
-      remoteModel = gltf.scene;
-      remoteModel.position.set(2, 0, 0);
-      scene.add(remoteModel);
-
-      remoteModel.traverse(child => {
-        if(child.isMesh){
-          child.morphTargetInfluences = child.morphTargetInfluences || [];
-        }
-      });
-      remoteModel.visible = false;
-    });
-
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth/window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-
-    // 滑鼠鎖定
-    document.body.addEventListener('click', () => {
-      if(document.pointerLockElement !== renderer.domElement){
-        renderer.domElement.requestPointerLock();
-      }
-    });
-    document.addEventListener('pointerlockchange', () => {
-      if(document.pointerLockElement === renderer.domElement){
-        document.addEventListener('mousemove', onMouseMove);
-      } else {
-        document.removeEventListener('mousemove', onMouseMove);
-      }
-    });
-
-    // 鍵盤事件
-    window.addEventListener('keydown', e => { keys[e.code] = true; });
-    window.addEventListener('keyup', e => { keys[e.code] = false; });
-
-    // 雙擊切換表情
-    window.addEventListener('dblclick', () => {
-      morphIndex = (morphIndex + 1) % morphCount;
-      updateMorphTargets(model, morphIndex);
-      // 同步表情給對方
-      if(conn && conn.open){
-        conn.send({type:'morph', morphIndex});
-      }
-    });
-  }
-
-  function loadModel(){
-    return new Promise((resolve, reject) => {
-      const loader = new THREE.GLTFLoader();
-      loader.load(
-        'https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/models/gltf/LittlestTokyo/LittlestTokyo.glb',
-        gltf => resolve(gltf),
-        undefined,
-        err => reject(err)
-      );
-    });
-  }
-
-  function updateMorphTargets(obj, index){
-    obj.traverse(child => {
-      if(child.isMesh && child.morphTargetInfluences){
-        for(let i=0; i < child.morphTargetInfluences.length; i++){
-          child.morphTargetInfluences[i] = (i === index) ? 1 : 0;
-        }
-      }
-    });
-  }
-
-  function onMouseMove(e){
-    const sensitivity = 0.002;
-    yaw -= e.movementX * sensitivity;
-    pitch -= e.movementY * sensitivity;
-    pitch = Math.min(Math.max(pitch, -Math.PI/2 + 0.1), Math.PI/2 - 0.1);
-  }
-
-  function animate(){
-    requestAnimationFrame(animate);
-    const dt = clock.getDelta();
-
-    if(!model) return;
-
-    // 移動控制
-    let moveDir = new THREE.Vector3();
-    if(keys['KeyW']) moveDir.z -= 1;
-    if(keys['KeyS']) moveDir.z += 1;
-    if(keys['KeyA']) moveDir.x -= 1;
-    if(keys['KeyD']) moveDir.x += 1;
-    moveDir.normalize();
-
-    let forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-    let right = new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0), forward);
-
-    velocity.set(0, 0, 0);
-    velocity.addScaledVector(forward, moveDir.z * speed);
-    velocity.addScaledVector(right, moveDir.x * speed);
-
-    model.position.addScaledVector(velocity, dt);
-    model.rotation.y = yaw;
-
-    // 相機（第一人稱固定頭部高度）
-    camera.position.copy(model.position);
-    camera.position.y += 1.6;
-
-    const lookDir = new THREE.Vector3(
-      Math.sin(yaw) * Math.cos(pitch),
-      Math.sin(pitch),
-      Math.cos(yaw) * Math.cos(pitch)
-    );
-    camera.lookAt(camera.position.clone().add(lookDir));
-
-    // 傳送位置旋轉
-    if(conn && conn.open){
-      conn.send({
-        type: 'posRot',
-        pos: model.position,
-        rotY: yaw
-      });
+    function createWall(x, z, width, height) {
+      const geometry = new THREE.BoxGeometry(width, height, wallThickness);
+      const mesh = new THREE.Mesh(geometry, wallMaterial);
+      mesh.position.set(x, height/2, z);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+      objects.push(mesh);
     }
 
-    if(mixer) mixer.update(dt);
+    createWall(0, -wallLength/2, wallLength, wallHeight);
+    createWall(0, wallLength/2, wallLength, wallHeight);
+    createWall(-wallLength/2, 0, wallThickness, wallHeight);
+    createWall(wallLength/2, 0, wallThickness, wallHeight);
+
+    // 箱子
+    const boxTexture = new THREE.TextureLoader().load('https://threejs.org/examples/textures/crate.gif');
+    const boxMaterial = new THREE.MeshPhongMaterial({ map: boxTexture });
+    const boxGeometry = new THREE.BoxGeometry(5,5,5);
+    const box = new THREE.Mesh(boxGeometry, boxMaterial);
+    box.position.set(10, 2.5, -10);
+    box.name = "crate";
+    scene.add(box);
+    objects.push(box);
+
+    // 其他玩家模型（簡單球）
+    const sphereGeometry = new THREE.SphereGeometry(1.5, 16, 16);
+    const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+    otherPlayerMesh = new THREE.Mesh(sphereGeometry, sphereMaterial);
+    otherPlayerMesh.position.set(0, 2, 0);
+    scene.add(otherPlayerMesh);
+
+    // 鍵盤事件
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+
+    window.addEventListener('resize', onWindowResize);
+  }
+
+  function onWindowResize(){
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  function onKeyDown(event) {
+    switch(event.code) {
+      case 'ArrowUp':
+      case 'KeyW':
+        moveForward = true;
+        break;
+      case 'ArrowLeft':
+      case 'KeyA':
+        moveLeft = true;
+        break;
+      case 'ArrowDown':
+      case 'KeyS':
+        moveBackward = true;
+        break;
+      case 'ArrowRight':
+      case 'KeyD':
+        moveRight = true;
+        break;
+      case 'Space':
+        velocity.y = 10; // 無限跳
+        break;
+      case 'KeyE':
+        interact();
+        break;
+    }
+  }
+
+  function onKeyUp(event) {
+    switch(event.code) {
+      case 'ArrowUp':
+      case 'KeyW':
+        moveForward = false;
+        break;
+      case 'ArrowLeft':
+      case 'KeyA':
+        moveLeft = false;
+        break;
+      case 'ArrowDown':
+      case 'KeyS':
+        moveBackward = false;
+        break;
+      case 'ArrowRight':
+      case 'KeyD':
+        moveRight = false;
+        break;
+    }
+  }
+
+  function interact() {
+    if (currentInteractObject) {
+      alert(`你觸發了 ${currentInteractObject.name} 的互動！`);
+    }
+  }
+
+  // --- P2P 連線部分 ---
+
+  // 建立 PeerJS 物件，使用簡單ID轉換：用純數字ID
+  // 注意：PeerJS 會自動加前綴，避免衝突
+  // 這裡簡單用 4位數字字串作ID
+
+  let peer, conn;
+  const myIdSpan = document.getElementById('myId');
+  const connectIdInput = document.getElementById('connectIdInput');
+  const connectBtn = document.getElementById('connectBtn');
+  const statusDiv = document.getElementById('status');
+
+  function generateRandomId(){
+    return String(Math.floor(1000 + Math.random()*9000)); // 4位純數字ID
+  }
+
+  function initPeer(){
+    // 生成ID
+    const myId = generateRandomId();
+    myIdSpan.innerText = myId;
+
+    // 建立Peer
+    peer = new Peer(myId, {
+      host: 'peerjs.com', // 公共服務器，或你自己架設的
+      port: 443,
+      secure: true
+    });
+
+    peer.on('open', id => {
+      console.log('Peer ID: ' + id);
+      statusDiv.innerText = '等待連線... (你的ID:'+id+')';
+    });
+
+    peer.on('connection', c => {
+      if (conn && conn.open) {
+        // 已經有連線了，拒絕新連線
+        c.on('open', () => {
+          c.send('已有玩家連線');
+          setTimeout(() => c.close(), 500);
+        });
+        return;
+      }
+      conn = c;
+      setupConnection();
+    });
+
+    peer.on('error', err => {
+      console.error(err);
+      alert('Peer錯誤: ' + err);
+    });
+  }
+
+  connectBtn.addEventListener('click', () => {
+    const id = connectIdInput.value.trim();
+    if (!/^\d{4}$/.test(id)) {
+      alert('請輸入4位純數字ID');
+      return;
+    }
+    if (conn && conn.open) {
+      alert('已有連線了');
+      return;
+    }
+    conn = peer.connect(id);
+    conn.on('open', () => {
+      statusDiv.innerText = '已連線到 ' + id;
+      setupConnection();
+    });
+    conn.on('error', err => {
+      alert('連線錯誤: ' + err);
+    });
+  });
+
+  function setupConnection() {
+    statusDiv.innerText = '已連線';
+    conn.on('data', data => {
+      if (data.type === 'pos') {
+        // 收到對方位置
+        const p = data.position;
+        otherPlayerMesh.position.set(p.x, p.y, p.z);
+      }
+    });
+    conn.on('close', () => {
+      statusDiv.innerText = '連線斷開';
+      otherPlayerMesh.position.set(0, -1000, 0); // 讓球消失
+      conn = null;
+    });
+  }
+
+  initPeer();
+
+  // --- 動畫循環 ---
+  function animate() {
+    requestAnimationFrame(animate);
+
+    const time = performance.now();
+    const delta = (time - prevTime) / 1000;
+
+    if (controls.isLocked === true) {
+      velocity.y -= 9.8 * 10.0 * delta;
+
+      direction.z = Number(moveForward) - Number(moveBackward);
+      direction.x = Number(moveRight) - Number(moveLeft);
+      direction.normalize();
+
+      if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
+      if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
+
+      controls.moveRight(- velocity.x * delta);
+      controls.moveForward(- velocity.z * delta);
+
+      controls.getObject().position.y += velocity.y * delta;
+
+      if (controls.getObject().position.y < 2) {
+        velocity.y = 0;
+        controls.getObject().position.y = 2;
+        canJump = true;
+      }
+
+      // 互動判斷
+      currentInteractObject = null;
+      interactPrompt.style.display = 'none';
+      const playerPos = controls.getObject().position;
+      for (let obj of objects) {
+        const dist = obj.position.distanceTo(playerPos);
+        if (dist < 5 && obj.name === "crate") {
+          currentInteractObject = obj;
+          interactPrompt.style.display = 'block';
+          break;
+        }
+      }
+
+      // 傳送自己位置給對方（位置同步）
+      if (conn && conn.open) {
+        conn.send({
+          type: 'pos',
+          position: {
+            x: playerPos.x,
+            y: playerPos.y,
+            z: playerPos.z
+          }
+        });
+      }
+    }
+
+    velocity.x -= velocity.x * 10.0 * delta;
+    velocity.z -= velocity.z * 10.0 * delta;
+
+    prevTime = time;
 
     renderer.render(scene, camera);
   }
 
-  window.onload = () => {
-    clock = new THREE.Clock();
-    initThree();
-    setupPeer();
-    animate();
-  };
+  // 渲染器設定放這
+  renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  document.body.appendChild(renderer.domElement);
 </script>
-
 </body>
 </html>
