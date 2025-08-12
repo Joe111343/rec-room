@@ -1,0 +1,32 @@
+{
+  "apple": {
+    "name": "蘋果",
+    "desc": "紅紅的蘋果，補充能量",
+    "weight": 0.2,
+    "img": "https://upload.wikimedia.org/wikipedia/commons/1/15/Red_Apple.jpg"
+  },
+  "key": {
+    "name": "鑰匙",
+    "desc": "打開門用的鑰匙",
+    "weight": 0.1,
+    "img": "https://upload.wikimedia.org/wikipedia/commons/e/e4/Key_icon.svg"
+  },
+  "sword": {
+    "name": "劍",
+    "desc": "鋒利的劍，戰鬥用",
+    "weight": 3,
+    "img": "https://upload.wikimedia.org/wikipedia/commons/3/32/Sword_icon.svg"
+  },
+  "shield": {
+    "name": "盾牌",
+    "desc": "防禦用盾牌",
+    "weight": 5,
+    "img": "https://upload.wikimedia.org/wikipedia/commons/a/a2/Shield_icon.svg"
+  },
+  "potion": {
+    "name": "治療藥水",
+    "desc": "恢復生命",
+    "weight": 0.5,
+    "img": "https://upload.wikimedia.org/wikipedia/commons/8/8d/Red_potion_icon.svg"
+  }
+}
