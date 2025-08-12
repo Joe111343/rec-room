@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>3D P2P雙人表情同步示範 (ES Module版)</title>
+<title>3D P2P雙人表情同步示範</title>
 <style>
   body { margin:0; overflow:hidden; background:#222; color:#eee; font-family: monospace; }
   #peerID {
@@ -37,12 +37,12 @@
   <div id="connStatus"></div>
 </div>
 
-<script type="module">
-  import Peer from 'https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.esm.min.js';
-  import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.module.js';
-  import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.150.1/examples/jsm/loaders/GLTFLoader.js';
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/loaders/GLTFLoader.js"></script>
 
-  // PeerJS 5位ID產生器
+<script>
+  // 產生5位數ID
   function generateRandomID() {
     return Math.floor(10000 + Math.random() * 90000).toString();
   }
@@ -58,13 +58,36 @@
   let velocity = new THREE.Vector3();
   let speed = 5;
 
-  // 初始化PeerJS
   function setupPeer(){
     const myId = generateRandomID();
-    peer = new Peer(myId, { debug: 2 });
+    peer = new Peer(myId, {
+      host: 'peerjs.com',
+      port: 443,
+      secure: true,
+      debug: 2
+    });
+
     peer.on('open', id => {
+      console.log('Peer opened with ID:', id);
       document.getElementById('peerID').textContent = '我的ID: ' + id;
     });
+
+    peer.on('error', err => {
+      console.error('PeerJS error:', err);
+      document.getElementById('peerID').textContent = '連線錯誤，請稍後重試';
+    });
+
+    peer.on('disconnected', () => {
+      console.warn('Peer disconnected');
+      document.getElementById('peerID').textContent = '已斷線，嘗試重新連線...';
+      peer.reconnect();
+    });
+
+    peer.on('close', () => {
+      console.warn('Peer connection關閉');
+      document.getElementById('peerID').textContent = '連線已關閉';
+    });
+
     peer.on('connection', c => {
       if(conn){
         c.close();
@@ -78,6 +101,7 @@
   function bindConnection(){
     document.getElementById('connStatus').textContent = '已連線: ' + conn.peer;
     if(remoteModel) remoteModel.visible = true;
+
     conn.on('data', data => {
       if(!remoteModel) return;
       if(data.type === 'posRot'){
@@ -88,6 +112,7 @@
         updateMorphTargets(remoteModel, remoteMorphIndex);
       }
     });
+
     conn.on('close', () => {
       document.getElementById('connStatus').textContent = '連線已斷開';
       if(remoteModel) remoteModel.visible = false;
@@ -122,7 +147,6 @@
     });
   };
 
-  // Three.js初始化
   function initThree(){
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x222222);
@@ -205,7 +229,7 @@
     window.addEventListener('keydown', e => { keys[e.code] = true; });
     window.addEventListener('keyup', e => { keys[e.code] = false; });
 
-    // 點擊切換表情
+    // 雙擊切換表情
     window.addEventListener('dblclick', () => {
       morphIndex = (morphIndex + 1) % morphCount;
       updateMorphTargets(model, morphIndex);
@@ -216,10 +240,9 @@
     });
   }
 
-  // 載入外部GLTF模型函式（LittlestTokyo）
   function loadModel(){
     return new Promise((resolve, reject) => {
-      const loader = new GLTFLoader();
+      const loader = new THREE.GLTFLoader();
       loader.load(
         'https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/models/gltf/LittlestTokyo/LittlestTokyo.glb',
         gltf => resolve(gltf),
@@ -229,7 +252,6 @@
     });
   }
 
-  // 設定Morph Targets顯示
   function updateMorphTargets(obj, index){
     obj.traverse(child => {
       if(child.isMesh && child.morphTargetInfluences){
@@ -240,7 +262,6 @@
     });
   }
 
-  // 控制視角
   function onMouseMove(e){
     const sensitivity = 0.002;
     yaw -= e.movementX * sensitivity;
@@ -248,7 +269,6 @@
     pitch = Math.min(Math.max(pitch, -Math.PI/2 + 0.1), Math.PI/2 - 0.1);
   }
 
-  // 遊戲主迴圈
   function animate(){
     requestAnimationFrame(animate);
     const dt = clock.getDelta();
@@ -293,7 +313,6 @@
       });
     }
 
-    // 更新動畫（如果有）
     if(mixer) mixer.update(dt);
 
     renderer.render(scene, camera);
