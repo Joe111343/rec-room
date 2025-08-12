@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>3D P2P 雙人連線範例</title>
+<title>3D P2P 雙人連線示範（ES Module版）</title>
 <style>
   body { margin:0; overflow:hidden; background:#222; }
   #info {
@@ -52,14 +52,15 @@
 
 <div id="npcDialog"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/loaders/GLTFLoader.js"></script>
+<!-- 這裡是用ES Module方式引入 -->
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.module.js';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.150.1/examples/jsm/loaders/GLTFLoader.js';
+import Peer from 'https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.es.min.js';
 
-<script>
 let scene, camera, renderer, clock;
 let playerMesh, mixer, actions = {};
-let remoteMesh, remoteMixer, remoteActions = {};
+let remoteMesh;
 let velocity = new THREE.Vector3();
 let velocityY = 0;
 let onGround = false;
@@ -72,7 +73,6 @@ const baseSpeed = 4;
 const sprintMultiplier = 2;
 const gravity = -9.8;
 const jumpSpeed = 5;
-let particles;
 
 let npcMesh;
 
@@ -124,7 +124,6 @@ document.getElementById('connectBtn').onclick = () => {
 };
 
 function init(){
-  // THREE.js 基本
   scene = new THREE.Scene();
   clock = new THREE.Clock();
 
@@ -178,7 +177,7 @@ function init(){
   document.body.appendChild(renderer.domElement);
 
   // 玩家模型載入
-  const loader = new THREE.GLTFLoader();
+  const loader = new GLTFLoader();
   loader.load('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r150/examples/models/gltf/RobotExpressive/RobotExpressive.glb', gltf=>{
     playerMesh = gltf.scene;
     playerMesh.scale.set(0.4,0.4,0.4);
@@ -198,7 +197,7 @@ function init(){
     actions['Idle'].play();
   });
 
-  // 遠端玩家 (clone 玩家模型簡易示範)
+  // 遠端玩家 (簡化為藍色盒子)
   remoteMesh = new THREE.Group();
   const remoteGeo = new THREE.BoxGeometry(1, 2, 1);
   const remoteMat = new THREE.MeshStandardMaterial({color:0x8888ff, transparent:true, opacity:0.7});
@@ -216,9 +215,6 @@ function init(){
   npcMesh.position.set(5,1,0);
   npcMesh.castShadow = true;
   scene.add(npcMesh);
-
-  // 粒子
-  initParticles();
 
   // 事件
   window.addEventListener('resize', onWindowResize);
@@ -242,21 +238,6 @@ function init(){
   });
 
   setupPeer();
-}
-
-function initParticles(){
-  const particleCount = 50;
-  const positions = new Float32Array(particleCount * 3);
-  for(let i=0;i<particleCount;i++){
-    positions[i*3] = (Math.random()-0.5)*0.5;
-    positions[i*3+1] = 0;
-    positions[i*3+2] = (Math.random()-0.5)*0.5;
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions,3));
-  const material = new THREE.PointsMaterial({color:0xffaa00, size:0.1});
-  particles = new THREE.Points(geometry, material);
-  if(playerMesh) playerMesh.add(particles);
 }
 
 function onWindowResize(){
@@ -346,7 +327,7 @@ function animate(){
   if(mixer) mixer.update(dt);
 
   if(playerMesh){
-    // 移動邏輯同單機版
+    // 移動邏輯
     let dir = new THREE.Vector3();
     if(keys['KeyW']) dir.z -= 1;
     if(keys['KeyS']) dir.z += 1;
@@ -356,6 +337,7 @@ function animate(){
 
     let speed = baseSpeed * (sprinting ? sprintMultiplier : 1);
 
+    // 用yaw和pitch算方向向量
     const forward = new THREE.Vector3(
       -Math.sin(yaw) * Math.cos(pitch),
       0,
