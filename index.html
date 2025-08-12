@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>P2P自動連線+玩家貼圖+碰撞示範</title>
+<title>第一個進來當房主 P2P 自動連線示範</title>
 <style>
   body { margin:0; overflow:hidden; background:#222; color:#eee; font-family: monospace; }
   #ui {
@@ -27,7 +27,7 @@
   <div style="margin-top:8px; font-size:14px;">
     WASD移動，滑鼠看視角，空白跳<br>
     點擊畫面啟用滑鼠控制<br>
-    自動配對連線，語音同步位置
+    第一個進來自動當房主，語音+位置同步
   </div>
 </div>
 
@@ -48,75 +48,92 @@
   }
 
   // --- P2P 自動配對設定 ---
-  const ROOM_ID = 'myroom12345678'; // 固定房間ID，改成你想要的
+  const ROOM_ID = 'myroom12345678'; // 固定房間ID，自己改
+
   let isHost = false;
   let conn = null;
   let call = null;
   let localStream = null;
 
-  // --- 初始化 PeerJS ---
   const peer = new Peer();
 
-  peer.on('open', id => {
+  peer.on('open', async (id) => {
     myIdSpan.textContent = id;
     log('Peer ID: ' + id);
 
-    if(id === ROOM_ID){
+    // 嘗試連線房主
+    let connectSucceeded = false;
+
+    try {
+      conn = peer.connect(ROOM_ID);
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject('timeout'), 3000);
+        conn.on('open', () => {
+          clearTimeout(timeout);
+          connectSucceeded = true;
+          resolve();
+        });
+        conn.on('error', reject);
+      });
+    } catch (e) {
+      log('無法連接房主，自己當房主');
       isHost = true;
       setStatus('你是房主，等待連線...');
-      log('你是房主，等待對方連線...');
-    } else {
-      setStatus('嘗試連線房主 ' + ROOM_ID);
-      log('嘗試連線房主: ' + ROOM_ID);
+      setupHost();
+      return;
+    }
 
-      conn = peer.connect(ROOM_ID);
+    if(connectSucceeded){
+      setStatus('已連線房主');
+      setupClient();
+    }
+  });
+
+  peer.on('error', e => log('Peer 錯誤: ' + e));
+
+  function setupHost(){
+    peer.on('connection', connection => {
+      if(conn){
+        connection.close();
+        log('已有連線，拒絕新連線');
+        return;
+      }
+      conn = connection;
       setupDataConn();
+      setStatus('房主已連線');
+      log('房主接收到連線');
+    });
 
-      // 取得麥克風，開始語音通話
+    peer.on('call', incomingCall => {
       navigator.mediaDevices.getUserMedia({audio:true})
       .then(stream => {
         localStream = stream;
-        call = peer.call(ROOM_ID, stream);
-        setupCall(call);
+        incomingCall.answer(stream);
+        setupCall(incomingCall);
       })
       .catch(e => {
         log('取得麥克風失敗：' + e);
         setStatus('取得麥克風失敗');
       });
-    }
-  });
+    });
+  }
 
-  peer.on('error', err => {
-    log('Peer 錯誤: ' + err);
-  });
-
-  peer.on('connection', connection => {
-    if(conn){
-      connection.close();
-      log('已有連線，拒絕新連線');
-      return;
-    }
-    conn = connection;
+  function setupClient(){
     setupDataConn();
-    setStatus('房主已連線');
-    log('房主接收到連線');
-  });
 
-  peer.on('call', incomingCall => {
     navigator.mediaDevices.getUserMedia({audio:true})
     .then(stream => {
       localStream = stream;
-      incomingCall.answer(stream);
-      setupCall(incomingCall);
+      call = peer.call(ROOM_ID, stream);
+      setupCall(call);
     })
     .catch(e => {
       log('取得麥克風失敗：' + e);
       setStatus('取得麥克風失敗');
     });
-  });
+  }
 
   function setupDataConn(){
-    setStatus('DataChannel已連線');
     conn.on('data', onDataReceived);
     conn.on('close', () => {
       setStatus('連線已斷開');
@@ -128,7 +145,6 @@
   }
 
   function setupCall(c){
-    setStatus('語音通話已建立');
     call = c;
     call.on('stream', remoteStream => {
       const audio = new Audio();
@@ -366,34 +382,44 @@
       if(!checkCollision(testPos)){
         player.pos.y = newY;
       } else {
-        player.vel.y = 0; // 碰撞頂天花板
+        player.vel.y = 0;
       }
-      playerMesh.position.y = player.pos.y;
+      player.grounded = false;
     }
 
-    // 更新相機位置及視角（第一人稱）
-    const camHeight = 1.6;
-    camera.position.set(player.pos.x, player.pos.y + camHeight - 0.85, player.pos.z);
-    camera.rotation.set(player.pitch, player.yaw, 0, 'YXZ');
+    // 更新玩家mesh位置
+    playerMesh.position.copy(player.pos);
 
-    // 傳送玩家狀態
-    sendPlayerState();
+    // 更新攝影機位置與視角
+    camera.position.copy(player.pos).add(new THREE.Vector3(0,0.6,0));
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = player.yaw;
+    camera.rotation.x = player.pitch;
 
-    // 對手方塊位置
-    enemyMesh.position.copy(enemy.pos);
+    // 對手 mesh 位置已由資料更新
+
+    // 傳送狀態頻率限制 (30fps)
+    if(now - (sendPlayerState.lastSend||0) > 33){
+      sendPlayerState();
+      sendPlayerState.lastSend = now;
+    }
 
     renderer.render(scene, camera);
   }
 
   animate();
 
-  // 視窗大小調整
-  window.addEventListener('resize', ()=>{
-    camera.aspect = window.innerWidth/window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+  // --- 音訊自動啟用 ---
+  // 在使用者點擊畫面啟用麥克風與P2P連線 (避免瀏覽器自動阻擋)
+  document.body.addEventListener('click', () => {
+    if(localStream) return;
+    navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+      localStream = stream;
+      log('麥克風已啟用');
+    }).catch(e=>{
+      log('麥克風啟用失敗：' + e);
+    });
   });
 </script>
-
 </body>
 </html>
