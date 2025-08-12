@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>P2P 雙人房主/連線 ID 輸入示範</title>
+<title>P2P 雙人第一人稱遊戲（貼圖＋碰撞）</title>
 <style>
   body { margin:0; overflow:hidden; background:#222; color:#eee; font-family: monospace; }
   #ui {
@@ -61,7 +61,6 @@
     statusDiv.textContent = '連線狀態：' + text;
   }
 
-  // 產生 5 位數 ID (字串)
   function gen5DigitId(){
     return Math.floor(10000 + Math.random()*90000).toString();
   }
@@ -72,7 +71,7 @@
   let call = null;
   let localStream = null;
 
-  let isHost = false;
+  let isHost = true;
 
   function setupPeer(id){
     peer = new Peer(id);
@@ -83,7 +82,6 @@
       log('Peer 開啟，ID: ' + id);
       setStatus('等待連線或輸入對方ID連線');
 
-      // 如果是房主，監聽連線與來電
       if(isHost){
         peer.on('connection', c => {
           if(conn){
@@ -141,25 +139,20 @@
     });
   }
 
-  // 按鈕事件，開始當房主或連線
   btnConnect.onclick = () => {
     if(conn){
       log('已連線，請刷新頁面重試');
       return;
     }
-
     const targetId = inputId.value.trim();
     if(!/^\d{5}$/.test(targetId)){
       alert('請輸入5位數數字ID');
       return;
     }
-
-    // 如果輸入ID等於自己ID，自己是房主
     if(targetId === myId){
       alert('不能連線自己ID，這是你的ID');
       return;
     }
-
     if(!myId){
       alert('尚未取得本機ID，請稍候');
       return;
@@ -167,13 +160,11 @@
 
     log('嘗試連線到 ID: ' + targetId);
 
-    // 當客戶端，連線到目標ID
     conn = peer.connect(targetId);
 
     conn.on('open', () => {
       setStatus('已連線至 ' + targetId);
       log('連線成功');
-      // 啟用麥克風，開始語音通話
       navigator.mediaDevices.getUserMedia({audio:true})
       .then(stream => {
         localStream = stream;
@@ -197,12 +188,10 @@
     });
   };
 
-  // 預先產生ID並初始化Peer，視為房主，等待他人連線
-  isHost = true;
   const myGeneratedId = gen5DigitId();
   setupPeer(myGeneratedId);
 
-  // --- 以下與前面相同，three.js 場景與控制 ---
+  // ----------------- Three.js 環境 -----------------
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x333333);
@@ -221,8 +210,21 @@
   dirLight.position.set(5, 10, 7);
   scene.add(dirLight);
 
+  // 貼圖載入器
+  const loader = new THREE.TextureLoader();
+
+  // 地板貼圖 (木地板示範)
+  const floorTexture = loader.load('https://i.imgur.com/hhLmKU7.jpg');
+  floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
+  floorTexture.repeat.set(10,10);
+  const floorMat = new THREE.MeshStandardMaterial({map: floorTexture});
+
+  // 牆壁貼圖 (磚牆示範)
+  const wallTexture = loader.load('https://i.imgur.com/YRXNwRH.jpg');
+  wallTexture.wrapS = wallTexture.wrapT = THREE.RepeatWrapping;
+  wallTexture.repeat.set(2,2);
+
   const floorGeo = new THREE.PlaneGeometry(50,50);
-  const floorMat = new THREE.MeshStandardMaterial({color:0x555555});
   const floorMesh = new THREE.Mesh(floorGeo, floorMat);
   floorMesh.rotation.x = -Math.PI/2;
   floorMesh.receiveShadow = true;
@@ -232,7 +234,7 @@
 
   function createWall(x,y,z,w,h,d){
     const geo = new THREE.BoxGeometry(w,h,d);
-    const mat = new THREE.MeshStandardMaterial({color:0x888888});
+    const mat = new THREE.MeshStandardMaterial({map: wallTexture});
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(x,y,z);
     mesh.castShadow = true;
@@ -249,9 +251,8 @@
   createWall(-25,2.5,0, 1,5,50);
   createWall(25,2.5,0, 1,5,50);
 
+  // 玩家模型與貼圖
   const playerGeo = new THREE.BoxGeometry(0.8,1.7,0.8);
-
-  const loader = new THREE.TextureLoader();
 
   const playerTextureURL = 'https://i.imgur.com/WLVaWVa.png';
   const enemyTextureURL = 'https://i.imgur.com/s8PUpct.png';
@@ -315,6 +316,11 @@
       if(pBox.intersectsBox(wallBox)){
         return true;
       }
+    }
+    // 玩家之間碰撞判斷
+    const enemyBox = getPlayerBox(enemy.pos);
+    if(pBox.intersectsBox(enemyBox)){
+      return true;
     }
     return false;
   }
@@ -426,7 +432,6 @@
 
   animate();
 
-  // 啟用麥克風在點擊時
   document.body.addEventListener('click', () => {
     if(localStream) return;
     navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
@@ -437,5 +442,6 @@
     });
   });
 </script>
+
 </body>
 </html>
