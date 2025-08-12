@@ -403,31 +403,29 @@ function animate(){
 
   // 移動方向計算：含 pitch 和 yaw
   if(dir.length()>0){
-    // 建立前方方向向量（含 pitch）
-    const forward = new THREE.Vector3(
-      Math.sin(yaw) * Math.cos(pitch),
-      0, // 垂直方向移動用跳躍，不用 pitch 垂直移動
-      Math.cos(yaw) * Math.cos(pitch)
-    ).normalize();
+  // 修正前後方向反轉，W鍵往前
+  const forward = new THREE.Vector3(
+    -Math.sin(yaw) * Math.cos(pitch),
+    0,
+    -Math.cos(yaw) * Math.cos(pitch)
+  ).normalize();
 
-    // 右方向量（忽略 pitch，保持水平）
-    const right = new THREE.Vector3(
-      Math.sin(yaw - Math.PI/2),
-      0,
-      Math.cos(yaw - Math.PI/2)
-    ).normalize();
+  const right = new THREE.Vector3(
+    Math.sin(yaw - Math.PI/2),
+    0,
+    Math.cos(yaw - Math.PI/2)
+  ).normalize();
 
-    // 移動向量
-    const moveDir = new THREE.Vector3();
-    moveDir.addScaledVector(forward, dir.z);
-    moveDir.addScaledVector(right, dir.x);
-    moveDir.normalize();
+  const moveDir = new THREE.Vector3();
+  moveDir.addScaledVector(forward, dir.z);
+  moveDir.addScaledVector(right, dir.x);
+  moveDir.normalize();
 
-    velocity.x = moveDir.x * speed;
-    velocity.z = moveDir.z * speed;
-  } else {
-    velocity.x = 0;
-    velocity.z = 0;
+  velocity.x = moveDir.x * speed;
+  velocity.z = moveDir.z * speed;
+} else {
+  velocity.x = 0;
+  velocity.z = 0;
   }
 
   // 重力與跳躍
