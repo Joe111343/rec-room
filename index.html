@@ -1,4 +1,251 @@
-    mesh.position.set(x,y,z);
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>P2P 雙人第一人稱遊戲（輸入框焦點修正版）</title>
+<style>
+  body { margin:0; overflow:hidden; background:#222; color:#eee; font-family: monospace; }
+  #ui {
+    position: fixed; top: 10px; left: 10px;
+    background: rgba(0,0,0,0.7);
+    padding: 10px; border-radius: 5px; max-width: 320px;
+    z-index: 10;
+  }
+  #log {
+    max-height: 100px; overflow-y: auto; margin-top: 10px; font-size: 12px;
+    background: #111; padding: 5px; border-radius: 3px;
+  }
+  input[type=text] {
+    font-size: 14px; padding: 4px; width: 100px;
+    border-radius: 3px; border: none; outline:none;
+  }
+  button {
+    font-size: 14px; padding: 4px 10px; border-radius: 3px;
+    border:none; cursor:pointer; margin-left: 8px;
+  }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <div>你的ID（5位數）：<span id="myId">...</span></div>
+  <div>
+    連線到ID：<input type="text" id="inputId" maxlength="5" placeholder="輸入5位ID" autocomplete="off" />
+    <button id="btnConnect">連線</button>
+  </div>
+  <div id="status">連線狀態：尚未連線</div>
+  <div id="log"></div>
+  <div style="margin-top:8px; font-size:14px;">
+    WASD移動，滑鼠看視角，空白跳<br>
+    點擊畫面啟用滑鼠控制與麥克風<br>
+    先開一個頁面成為房主，另一個輸入ID連線
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+
+<script>
+  const logElem = document.getElementById('log');
+  const myIdSpan = document.getElementById('myId');
+  const statusDiv = document.getElementById('status');
+  const inputId = document.getElementById('inputId');
+  const btnConnect = document.getElementById('btnConnect');
+
+  function log(text){
+    logElem.textContent += text + '\n';
+    logElem.scrollTop = logElem.scrollHeight;
+  }
+  function setStatus(text){
+    statusDiv.textContent = '連線狀態：' + text;
+  }
+
+  function gen5DigitId(){
+    return Math.floor(10000 + Math.random()*90000).toString();
+  }
+
+  let peer = null;
+  let myId = null;
+  let conn = null;
+  let call = null;
+  let localStream = null;
+
+  let isHost = true;
+
+  function setupPeer(id){
+    peer = new Peer(id);
+
+    peer.on('open', id => {
+      myId = id;
+      myIdSpan.textContent = id;
+      log('Peer 開啟，ID: ' + id);
+      setStatus('等待連線或輸入對方ID連線');
+
+      if(isHost){
+        peer.on('connection', c => {
+          if(conn){
+            c.close();
+            log('已有連線，拒絕新連線');
+            return;
+          }
+          conn = c;
+          setupDataConn();
+          setStatus('房主已連線');
+          log('房主接收到連線');
+        });
+
+        peer.on('call', incomingCall => {
+          navigator.mediaDevices.getUserMedia({audio:true})
+          .then(stream => {
+            localStream = stream;
+            incomingCall.answer(stream);
+            setupCall(incomingCall);
+          })
+          .catch(e => {
+            log('取得麥克風失敗：' + e);
+            setStatus('取得麥克風失敗');
+          });
+        });
+      }
+    });
+
+    peer.on('error', e => log('Peer 錯誤: ' + e));
+  }
+
+  function setupDataConn(){
+    conn.on('data', onDataReceived);
+    conn.on('close', () => {
+      setStatus('連線已斷開');
+      log('DataChannel關閉');
+      conn = null;
+      call = null;
+    });
+    conn.on('error', e => log('DataChannel錯誤：' + e));
+  }
+
+  function setupCall(c){
+    call = c;
+    call.on('stream', remoteStream => {
+      const audio = new Audio();
+      audio.srcObject = remoteStream;
+      audio.play();
+      log('開始播放遠端語音');
+    });
+    call.on('close', () => {
+      setStatus('語音通話結束');
+      log('語音通話結束');
+      call = null;
+    });
+  }
+
+  btnConnect.onclick = () => {
+    inputId.blur();  // 移除輸入框焦點，避免攔截鍵盤事件
+    if(conn){
+      log('已連線，請刷新頁面重試');
+      return;
+    }
+    const targetId = inputId.value.trim();
+    if(!/^\d{5}$/.test(targetId)){
+      alert('請輸入5位數數字ID');
+      return;
+    }
+    if(targetId === myId){
+      alert('不能連線自己ID，這是你的ID');
+      return;
+    }
+    if(!myId){
+      alert('尚未取得本機ID，請稍候');
+      return;
+    }
+
+    log('嘗試連線到 ID: ' + targetId);
+
+    conn = peer.connect(targetId);
+
+    conn.on('open', () => {
+      setStatus('已連線至 ' + targetId);
+      log('連線成功');
+      navigator.mediaDevices.getUserMedia({audio:true})
+      .then(stream => {
+        localStream = stream;
+        call = peer.call(targetId, stream);
+        setupCall(call);
+      })
+      .catch(e => {
+        log('取得麥克風失敗：' + e);
+        setStatus('取得麥克風失敗');
+      });
+    });
+
+    conn.on('data', onDataReceived);
+
+    conn.on('error', e => log('連線錯誤：' + e));
+    conn.on('close', () => {
+      setStatus('連線已斷開');
+      log('DataChannel關閉');
+      conn = null;
+      call = null;
+    });
+  };
+
+  // 監聽輸入框 Enter 鍵觸發連線
+  inputId.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){
+      e.preventDefault();
+      btnConnect.click();
+    }
+  });
+
+  const myGeneratedId = gen5DigitId();
+  setupPeer(myGeneratedId);
+
+  // ----------------- Three.js 環境 -----------------
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x333333);
+
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0,2,5);
+
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+  scene.add(ambientLight);
+
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(5, 10, 7);
+  scene.add(dirLight);
+
+  // 貼圖載入器
+  const loader = new THREE.TextureLoader();
+
+  // 地板貼圖 (木地板示範)
+  const floorTexture = loader.load('https://i.imgur.com/hhLmKU7.jpg');
+  floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
+  floorTexture.repeat.set(10,10);
+  const floorMat = new THREE.MeshStandardMaterial({map: floorTexture});
+
+  // 牆壁貼圖 (磚牆示範)
+  const wallTexture = loader.load('https://i.imgur.com/YRXNwRH.jpg');
+  wallTexture.wrapS = wallTexture.wrapT = THREE.RepeatWrapping;
+  wallTexture.repeat.set(2,2);
+
+  const floorGeo = new THREE.PlaneGeometry(50,50);
+  const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+  floorMesh.rotation.x = -Math.PI/2;
+  floorMesh.receiveShadow = true;
+  scene.add(floorMesh);
+
+  const walls = [];
+
+  function createWall(x,y,z,w,h,d){
+    const geo = new THREE.BoxGeometry(w,h,d);
+    const mat = new THREE.MeshStandardMaterial({map: wallTexture});
+    const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(x,y,z);
     scene.add(mesh);
     // 牆體碰撞盒
     const box = new THREE.Box3().setFromObject(mesh);
