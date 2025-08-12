@@ -3,312 +3,292 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>P2P 雙人 - 修正版（正確移動 + 對手同步 + 碰撞）</title>
+<title>可動版 P2P 雙人（保險版）</title>
 <style>
-  body{margin:0;overflow:hidden;background:#111;color:#eee;font-family:Arial,monospace}
-  #ui{position:fixed;left:10px;top:10px;background:rgba(0,0,0,0.7);padding:10px;border-radius:6px;z-index:10;max-width:340px}
-  #log{max-height:120px;overflow:auto;background:#111;padding:6px;border-radius:4px;margin-top:6px;font-size:12px}
-  input[type=text]{padding:6px;border-radius:4px;border:none;width:100px}
-  button{padding:6px 8px;border-radius:4px;border:none;background:#2b7ef7;color:white;cursor:pointer;margin-left:6px}
-  #hint{margin-top:8px;font-size:13px;color:#ccc}
+  body{margin:0;overflow:hidden;background:#111;color:#eee;font-family:system-ui,monospace}
+  #ui{position:fixed;left:12px;top:12px;background:rgba(0,0,0,0.7);padding:12px;border-radius:8px;z-index:20;max-width:360px}
+  #log{max-height:120px;overflow:auto;background:#0e0e0e;padding:6px;border-radius:6px;margin-top:8px;font-size:12px}
+  input[type=text]{padding:6px;border-radius:6px;border:none;width:110px}
+  button{padding:6px 10px;border-radius:6px;border:none;background:#2196f3;color:#fff;cursor:pointer;margin-left:6px}
+  #hint{margin-top:8px;color:#bbb;font-size:13px}
+  #hiddenNote{display:block;color:#ffb86b;margin-top:6px;font-size:12px}
 </style>
 </head>
 <body>
   <div id="ui">
-    <div>你的ID（5位數）： <span id="myId">...</span></div>
-    <div style="margin-top:6px">
-      連線到ID：<input id="inputId" maxlength="5" autocomplete="off" placeholder="輸入5位ID" />
+    <div>你的ID（5位數）： <strong id="myId">...</strong></div>
+    <div style="margin-top:8px">
+      連線到 ID：
+      <input id="inputId" maxlength="5" autocomplete="off" placeholder="輸入5位ID" />
       <button id="btnConnect">連線</button>
+      <span id="hiddenNote" style="display:none">已連線，隱藏輸入區</span>
     </div>
     <div id="status" style="margin-top:8px">連線狀態：尚未連線</div>
     <div id="log"></div>
-    <div id="hint">
-      點擊畫面啟用滑鼠視角與麥克風<br/>
-      WASD 移動，空白跳，靠近牆壁/對手會被擋住
-    </div>
+    <div id="hint">點擊畫面啟用滑鼠視角與麥克風。WASD 移動，空白跳。</div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
 
 <script>
-/* ----------------- UI / helper ----------------- */
-const myIdSpan = document.getElementById('myId');
-const inputId = document.getElementById('inputId');
+/* ---------- UI helpers ---------- */
+const myIdEl = document.getElementById('myId');
+const inputEl = document.getElementById('inputId');
 const btnConnect = document.getElementById('btnConnect');
-const statusDiv = document.getElementById('status');
-const logElem = document.getElementById('log');
-function log(t){ logElem.textContent += t + '\n'; logElem.scrollTop = logElem.scrollHeight; }
-function setStatus(s){ statusDiv.textContent = '連線狀態：' + s; }
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const hiddenNote = document.getElementById('hiddenNote');
+function log(t){ logEl.textContent += t + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+function setStatus(s){ statusEl.textContent = '連線狀態：' + s; }
 
-/* ---------- P2P (PeerJS) & connection UI ---------- */
-function gen5DigitId(){ return Math.floor(10000 + Math.random()*90000).toString(); }
-
+/* ---------- PeerJS setup (5-digit ID) ---------- */
+function gen5() { return Math.floor(10000 + Math.random()*90000).toString(); }
 let peer=null, myId=null, conn=null, call=null, localStream=null;
-let isHost=true;
+let isHost = true; // first page is host by default
 
 function setupPeer(id){
   peer = new Peer(id);
   peer.on('open', id=>{
-    myId = id;
-    myIdSpan.textContent = id;
+    myId = id; myIdEl.textContent = id;
     setStatus('等待連線或輸入對方ID連線');
-    log('Peer open: ' + id);
-    // 若為Host（第一個頁面），監聽 incoming connection/call
+    log('Peer 開啟: ' + id);
     if(isHost){
-      peer.on('connection', c => {
+      peer.on('connection', c=>{
         if(conn){ c.close(); log('已有連線，拒絕新連線'); return; }
         conn = c; setupDataConn(); setStatus('房主已連線'); log('房主接收到連線');
+        // hide input UI after someone connects
+        hideInputUI();
       });
-      peer.on('call', incoming => {
-        navigator.mediaDevices.getUserMedia({audio:true})
-          .then(s => { localStream = s; incoming.answer(s); setupCall(incoming); })
-          .catch(e => { log('麥克風拒絕或錯誤: ' + e); setStatus('需允許麥克風'); });
+      peer.on('call', incoming=>{
+        navigator.mediaDevices.getUserMedia({audio:true}).then(s=>{
+          localStream = s; incoming.answer(s); setupCall(incoming);
+        }).catch(e=>{ log('麥克風被拒或錯誤: '+e); setStatus('需允許麥克風'); });
       });
     }
   });
-  peer.on('error', e => log('Peer error: ' + e));
+  peer.on('error', e => log('Peer err: ' + e));
 }
 
+/* manage data & call */
 function setupDataConn(){
   conn.on('data', onDataReceived);
-  conn.on('close', ()=>{ setStatus('連線已斷開'); log('DataChannel closed'); conn = null; call = null; });
-  conn.on('error', e => log('DataChannel error: ' + e));
+  conn.on('open', ()=>{ log('DataChannel open'); hideInputUI(); });
+  conn.on('close', ()=>{ setStatus('連線已斷開'); log('DataChannel closed'); conn=null; call=null; showInputUI(); });
+  conn.on('error', e=>log('DataChannel error: '+e));
 }
-
 function setupCall(c){
   call = c;
-  call.on('stream', remoteStream => {
-    const a = new Audio();
-    a.srcObject = remoteStream;
-    a.play().catch(()=>{ /* autoplay policy */ });
-    log('開始播放遠端語音');
-    setStatus('語音已連線');
+  call.on('stream', rs=>{
+    const a = new Audio(); a.srcObject = rs; a.play().catch(()=>{});
+    log('開始播放遠端語音'); setStatus('語音已連線');
   });
-  call.on('close', ()=>{ log('call closed'); setStatus('語音中斷'); call = null; });
+  call.on('close', ()=>{ log('call closed'); setStatus('語音中斷'); call=null; });
 }
 
-/* connect button / enter key */
-btnConnect.addEventListener('click', () => {
-  inputId.blur(); // 移除焦點，讓鍵盤控制回來
+/* connect flow (client) */
+btnConnect.addEventListener('click', ()=>{
+  inputEl.blur(); // blur to release keyboard focus
   startClientConnect();
 });
-inputId.addEventListener('keydown', e => {
-  if(e.key === 'Enter'){ e.preventDefault(); btnConnect.click(); }
-});
+inputEl.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); inputEl.blur(); startClientConnect(); } });
 
-/* start connecting as client to targetId */
 function startClientConnect(){
-  if(conn){ log('已有連線，請刷新'); return; }
-  const target = inputId.value.trim();
+  if(conn){ log('已有連線'); return; }
+  const target = inputEl.value.trim();
   if(!/^\d{5}$/.test(target)){ alert('請輸入 5 位數字 ID'); return; }
+  if(!myId){ alert('尚未取得本機ID，請稍候'); return; }
   if(target === myId){ alert('不能連線自己ID'); return; }
   log('嘗試連線到 ' + target);
   conn = peer.connect(target);
   conn.on('open', ()=>{
-    setStatus('已連線至 ' + target);
-    log('DataChannel open');
-    // 音訊通話
-    navigator.mediaDevices.getUserMedia({audio:true})
-      .then(s => { localStream = s; call = peer.call(target, s); setupCall(call); })
-      .catch(e => { log('麥克風失敗: ' + e); setStatus('需允許麥克風'); });
+    setStatus('已連線至 ' + target); log('連線成功');
+    // request mic and call
+    navigator.mediaDevices.getUserMedia({audio:true}).then(s=>{
+      localStream = s; call = peer.call(target, s); setupCall(call);
+    }).catch(e=>{ log('麥克風錯誤: '+e); setStatus('需允許麥克風'); });
+    hideInputUI();
   });
   conn.on('data', onDataReceived);
-  conn.on('error', e=> log('conn error: '+e));
-  conn.on('close', ()=>{ setStatus('連線已斷開'); conn=null; call=null; });
+  conn.on('error', e => log('conn err: '+e));
+  conn.on('close', ()=>{ setStatus('連線已斷開'); conn=null; call=null; showInputUI(); });
 }
 
-/* start as host by default (first opened page) */
-const myGeneratedId = gen5DigitId();
-setupPeer(myGeneratedId);
+/* hide/show input UI when connected */
+function hideInputUI(){
+  document.getElementById('inputId').style.display = 'none';
+  btnConnect.style.display = 'none';
+  hiddenNote.style.display = 'block';
+}
+function showInputUI(){
+  document.getElementById('inputId').style.display = '';
+  btnConnect.style.display = '';
+  hiddenNote.style.display = 'none';
+}
 
-/* ----------------- three.js scene ----------------- */
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x333333);
+/* start as host with generated ID */
+const startId = gen5();
+setupPeer(startId);
 
+/* ---------- three.js scene & gameplay ---------- */
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x333333);
 const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
 camera.position.set(0,2,5);
-const renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(innerWidth, innerHeight);
+const renderer = new THREE.WebGLRenderer({antialias:true}); renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-const dirLight = new THREE.DirectionalLight(0xffffff, 0.8); dirLight.position.set(5,10,7); scene.add(dirLight);
+scene.add(new THREE.AmbientLight(0xffffff,0.6));
+const dlight = new THREE.DirectionalLight(0xffffff,0.8); dlight.position.set(5,10,7); scene.add(dlight);
 
 /* textures */
 const loader = new THREE.TextureLoader();
 const floorTex = loader.load('https://i.imgur.com/hhLmKU7.jpg');
 floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(10,10);
-const floorMat = new THREE.MeshStandardMaterial({map: floorTex});
-const wallTex = loader.load('https://i.imgur.com/YRXNwRH.jpg');
-wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping; wallTex.repeat.set(2,2);
-
-/* floor */
-const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(50,50), floorMat);
-floorMesh.rotation.x = -Math.PI/2; scene.add(floorMesh);
+const floorMat = new THREE.MeshStandardMaterial({map:floorTex});
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(50,50), floorMat); floor.rotation.x = -Math.PI/2; scene.add(floor);
+const wallTex = loader.load('https://i.imgur.com/YRXNwRH.jpg'); wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping; wallTex.repeat.set(2,2);
 
 /* walls + collision boxes */
 const walls = [];
 function createWall(x,y,z,w,h,d){
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({map: wallTex}));
-  mesh.position.set(x,y,z); scene.add(mesh);
-  walls.push(new THREE.Box3().setFromObject(mesh));
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({map:wallTex}));
+  m.position.set(x,y,z); scene.add(m);
+  walls.push(new THREE.Box3().setFromObject(m));
 }
 createWall(0,2.5,-25,50,5,1);
 createWall(0,2.5,25,50,5,1);
 createWall(-25,2.5,0,1,5,50);
 createWall(25,2.5,0,1,5,50);
 
-/* player (invisible capsule replacement: we'll use box col for collisions) */
+/* player visuals (remote) */
 const playerGeo = new THREE.BoxGeometry(0.8,1.7,0.8);
 const playerTex = loader.load('https://i.imgur.com/WLVaWVa.png');
 const enemyTex  = loader.load('https://i.imgur.com/s8PUpct.png');
-const playerMat = new THREE.MeshStandardMaterial({map: playerTex});
-const enemyMat  = new THREE.MeshStandardMaterial({map: enemyTex});
-const playerMesh = new THREE.Mesh(playerGeo, playerMat); playerMesh.visible = false; scene.add(playerMesh); // hidden - we use camera view instead
-let remoteMesh = null; // will create on first receive
+const playerMat = new THREE.MeshStandardMaterial({map:playerTex});
+const enemyMat = new THREE.MeshStandardMaterial({map:enemyTex});
+const playerMesh = new THREE.Mesh(playerGeo, playerMat); playerMesh.visible = false; scene.add(playerMesh); // hidden (camera is player)
+let remoteMesh = null;
 
-/* player state */
-const player = { pos: new THREE.Vector3(0,0.85,0), vel: new THREE.Vector3(0,0,0), yaw:0, pitch:0, grounded:false };
-const enemy =  { pos: new THREE.Vector3(3,0.85,0), yaw:0, pitch:0, lastUpdate:0, interpPos: new THREE.Vector3(3,0.85,0) };
+/* state */
+const player = { pos:new THREE.Vector3(0,0.85,0), vel:new THREE.Vector3(0,0,0), yaw:0, pitch:0, grounded:false };
+const enemy  = { pos:new THREE.Vector3(3,0.85,0), interp:new THREE.Vector3(3,0.85,0), yaw:0, last:0 };
 
 /* controls */
 const keys = {};
 window.addEventListener('keydown', e => { keys[e.code]=true; if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault(); });
-window.addEventListener('keyup', e => { keys[e.code]=false; });
+window.addEventListener('keyup',   e => { keys[e.code]=false; });
 
 /* pointer lock & mouse */
-function onMouseMove(e){ player.yaw -= e.movementX * 0.002; player.pitch -= e.movementY * 0.002; const L= Math.PI/2-0.1; player.pitch = Math.max(-L, Math.min(L, player.pitch)); }
-document.body.addEventListener('click', ()=>{ if(document.pointerLockElement!==document.body){ document.body.requestPointerLock(); } if(!localStream){ navigator.mediaDevices.getUserMedia({audio:true}).then(s=>{ localStream=s; log('已取得麥克風'); }).catch(()=>{ log('無法取得麥克風'); }); }});
+function onMouseMove(e){ player.yaw -= e.movementX * 0.002; player.pitch -= e.movementY * 0.002; const L=Math.PI/2-0.1; player.pitch=Math.max(-L,Math.min(L,player.pitch)); }
+document.body.addEventListener('click', ()=>{
+  if(document.pointerLockElement !== document.body) document.body.requestPointerLock();
+  // try to get mic asap (user gesture)
+  if(!localStream){
+    navigator.mediaDevices.getUserMedia({audio:true}).then(s=>{ localStream=s; log('麥克風取得'); }).catch(()=>{ log('無法取得麥克風'); });
+  }
+});
 document.addEventListener('pointerlockchange', ()=>{ if(document.pointerLockElement===document.body) document.addEventListener('mousemove', onMouseMove); else document.removeEventListener('mousemove', onMouseMove); });
 
 /* collision helpers */
-const PLAYER_WIDTH = 0.6, PLAYER_HEIGHT = 1.7;
-function getPlayerBoxAt(pos){
-  return new THREE.Box3(
-    new THREE.Vector3(pos.x - PLAYER_WIDTH/2, pos.y - PLAYER_HEIGHT, pos.z - PLAYER_WIDTH/2),
-    new THREE.Vector3(pos.x + PLAYER_WIDTH/2, pos.y, pos.z + PLAYER_WIDTH/2)
-  );
-}
-function checkCollisionAll(testPos){
-  const box = getPlayerBoxAt(testPos);
-  // walls
-  for(const w of walls) if(box.intersectsBox(w)) return true;
-  // enemy
+const PW=0.6, PH=1.7;
+function playerBoxAt(pos){ return new THREE.Box3(new THREE.Vector3(pos.x-PW/2,pos.y-PH,pos.z-PW/2), new THREE.Vector3(pos.x+PW/2,pos.y,pos.z+PW/2)); }
+function collides(testPos){
+  const b = playerBoxAt(testPos);
+  for(const w of walls) if(b.intersectsBox(w)) return true;
   if(remoteMesh){
-    const enemyBox = getPlayerBoxAt(enemy.interpPos);
-    if(box.intersectsBox(enemyBox)) return true;
+    const eb = playerBoxAt(enemy.interp);
+    if(b.intersectsBox(eb)) return true;
   }
   return false;
 }
 
-/* movement + physics */
-const MOVE_SPEED = 5;
-const JUMP_V = 6;
-const GRAV = -9.8;
-function tryJump(){ if(player.grounded){ player.vel.y = JUMP_V; player.grounded = false; } }
+/* physics */
+const SPEED = 5, JUMP_V = 6, GRAV = -9.8;
+function tryJump(){ if(player.grounded){ player.vel.y = JUMP_V; player.grounded=false; } }
+function attemptMove(dx,dy,dz){ const np = player.pos.clone().add(new THREE.Vector3(dx,dy,dz)); if(!collides(np)){ player.pos.copy(np); return true; } return false; }
 
-function moveAttempt(dx,dy,dz){
-  const newPos = player.pos.clone().add(new THREE.Vector3(dx,dy,dz));
-  if(!checkCollisionAll(newPos)){ player.pos.copy(newPos); return true; }
-  return false;
-}
-
-/* network: send/receive JSON messages */
-function sendPlayerState(){
+/* networking: send minimal state */
+function sendState(){
   if(conn && conn.open){
-    // send minimal numbers to reduce payload
-    const payload = { t:'s', x:player.pos.x, y:player.pos.y, z:player.pos.z, yaw:player.yaw, pitch:player.pitch };
-    try{ conn.send(JSON.stringify(payload)); }catch(e){ /* ignore */ }
+    const p = { t:'s', x:player.pos.x, y:player.pos.y, z:player.pos.z, yaw:player.yaw };
+    try{ conn.send(JSON.stringify(p)); }catch(e){}
   }
 }
-
-let lastSend = 0;
 function onDataReceived(raw){
   let msg;
   try{ msg = typeof raw === 'string' ? JSON.parse(raw) : raw; }catch(e){ return; }
-  if(msg.t === 's'){ // state update
-    enemy.pos.set(msg.x, msg.y, msg.z);
+  if(msg.t === 's'){
+    enemy.pos.set(msg.x,msg.y,msg.z);
     enemy.yaw = msg.yaw;
-    enemy.pitch = msg.pitch;
-    enemy.lastUpdate = performance.now();
-    // create remote mesh if missing
+    enemy.last = performance.now();
     if(!remoteMesh){
       remoteMesh = new THREE.Mesh(playerGeo, enemyMat);
       scene.add(remoteMesh);
       remoteMesh.position.copy(enemy.pos);
+      enemy.interp.copy(enemy.pos);
     }
   }
 }
 
-/* animation loop */
-let lastTime = performance.now();
-function animate(){
-  requestAnimationFrame(animate);
-  const now = performance.now();
-  const dt = (now - lastTime)/1000;
-  lastTime = now;
+/* main loop */
+let last = performance.now(), lastSend = 0;
+function animate(){ requestAnimationFrame(animate);
+  const now = performance.now(), dt = (now - last)/1000; last = now;
 
-  // input -> movement vector relative to camera forward
-  let input = new THREE.Vector3();
-  if(keys['KeyW']) input.z -= 1;
-  if(keys['KeyS']) input.z += 1;
-  if(keys['KeyA']) input.x -= 1;
-  if(keys['KeyD']) input.x += 1;
-  if(input.lengthSq() > 0){
-    input.normalize();
-    // forward = camera forward projected to XZ
+  // input -> world move relative to camera forward
+  let inVec = new THREE.Vector3();
+  if(keys['KeyW']) inVec.z -= 1;
+  if(keys['KeyS']) inVec.z += 1;
+  if(keys['KeyA']) inVec.x -= 1;
+  if(keys['KeyD']) inVec.x += 1;
+  if(inVec.lengthSq()>0){
+    inVec.normalize();
+    // forward from camera (ignore y)
     const forward = new THREE.Vector3();
     camera.getWorldDirection(forward);
     forward.y = 0; forward.normalize();
-    // right = cross(forward, up)
-    const right = new THREE.Vector3();
-    right.crossVectors(forward, new THREE.Vector3(0,1,0)).negate();
-    // compose world movement
-    const moveVec = new THREE.Vector3();
-    moveVec.addScaledVector(forward, -input.z); // note: forward points toward -Z in camera space, make controls intuitive
-    moveVec.addScaledVector(right, input.x);
-    moveVec.normalize().multiplyScalar(MOVE_SPEED * dt);
-    moveAttempt(moveVec.x, 0, moveVec.z);
+    const right = new THREE.Vector3(); right.crossVectors(forward,new THREE.Vector3(0,1,0)).negate();
+    const move = new THREE.Vector3();
+    move.addScaledVector(forward, -inVec.z);
+    move.addScaledVector(right, inVec.x);
+    if(move.lengthSq()>0) move.normalize().multiplyScalar(SPEED * dt);
+    attemptMove(move.x,0,move.z);
   }
 
   if(keys['Space']) tryJump();
 
   // gravity
   player.vel.y += GRAV * dt;
-  const newY = player.pos.y + player.vel.y * dt;
-  if(newY < 0.85){
-    player.vel.y = 0; player.pos.y = 0.85; player.grounded = true;
-  } else {
-    const tpos = player.pos.clone(); tpos.y = newY;
-    if(!checkCollisionAll(tpos)){ player.pos.y = newY; } else { player.vel.y = 0; }
+  const ny = player.pos.y + player.vel.y * dt;
+  if(ny < 0.85){ player.vel.y = 0; player.pos.y = 0.85; player.grounded = true; } else {
+    const test = player.pos.clone(); test.y = ny;
+    if(!collides(test)) player.pos.y = ny; else player.vel.y = 0;
     player.grounded = false;
   }
 
-  // camera (first-person)
+  // camera first-person
   camera.position.copy(player.pos).add(new THREE.Vector3(0,0.6,0));
   camera.rotation.order = 'YXZ';
   camera.rotation.y = player.yaw;
   camera.rotation.x = player.pitch;
 
-  // set (hidden) player mesh for debugging/optional
+  // update hidden player mesh (for debug or other uses)
   playerMesh.position.copy(player.pos);
 
-  // interpolate remote for smoothing
+  // remote interpolation (smooth)
   if(remoteMesh){
-    // simple linear interpolation towards latest enemy.pos
-    enemy.interpPos.lerp(enemy.pos, Math.min(1, (now - enemy.lastUpdate)/100));
-    remoteMesh.position.copy(enemy.interpPos);
-    remoteMesh.rotation.y = enemy.yaw;
+    enemy.interp.lerp(enemy.pos, 0.2); // smoothing factor
+    remoteMesh.position.copy(enemy.interp);
+    remoteMesh.rotation.y = enemy.yaw || 0;
   }
 
-  // throttle state send ~30fps
-  if(now - lastSend > 33){ sendPlayerState(); lastSend = now; }
+  // send state ~30fps
+  if(now - lastSend > 33){ sendState(); lastSend = now; }
 
   renderer.render(scene, camera);
 }
 animate();
 
-/* window resize */
+/* resize */
 window.addEventListener('resize', ()=>{ camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
 </script>
