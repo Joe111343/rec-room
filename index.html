@@ -1,374 +1,276 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="zh-TW">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>自由跳躍遊戲 + P2P短ID連線</title>
-<style>
-  body { margin: 0; overflow: hidden; background: #222; color: white; font-family: sans-serif;}
-  #info {
-    position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px;
-    z-index: 10;
-  }
-  #connectUI {
-    position: absolute; top: 70px; left: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px;
-    z-index: 10;
-  }
-  #interactPrompt {
-    position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%);
-    color: white; background: rgba(0,0,0,0.5); padding: 10px 20px; border-radius: 8px; display: none;
-    font-size: 20px;
-  }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 物理遊戲範例</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            touch-action: none;
+            background-color: #333;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
 </head>
 <body>
-<div id="info">用 WASD 移動，空白跳躍，靠近箱子按 E 互動，點擊畫面開始</div>
-
-<div id="connectUI">
-  <div>你的ID：<span id="myId">...</span></div>
-  <input id="connectIdInput" type="text" maxlength="4" placeholder="輸入對方4位數ID" style="width:130px;" />
-  <button id="connectBtn">連線</button>
-  <div id="status">未連線</div>
-</div>
-
-<div id="interactPrompt">按 E 互動</div>
-
-<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/controls/PointerLockControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
-
-<script>
-  // --- Three.js 基本場景 & 控制 ---
-  let scene, camera, renderer, controls;
-  let objects = [];
-  let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
-  let velocity = new THREE.Vector3();
-  let direction = new THREE.Vector3();
-  let prevTime = performance.now();
-  let canJump = true;
-
-  // 互動提示
-  const interactPrompt = document.getElementById('interactPrompt');
-  let currentInteractObject = null;
-
-  // 其他玩家用簡單圓球表示
-  let otherPlayerMesh = null;
-
-  init();
-  animate();
-
-  function init() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xa0a0a0);
-
-    // 燈光
-    const light = new THREE.HemisphereLight(0xffffff, 0x444444);
-    light.position.set(0, 200, 0);
-    scene.add(light);
-
-    const dirLight = new THREE.DirectionalLight(0xffffff);
-    dirLight.position.set(0, 200, 100);
-    dirLight.castShadow = true;
-    scene.add(dirLight);
-
-    // 相機
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 1, 1000);
-
-    // 控制器
-    controls = new THREE.PointerLockControls(camera, document.body);
-
-    document.body.addEventListener('click', () => {
-      controls.lock();
-    });
-
-    controls.addEventListener('lock', () => {
-      document.getElementById('info').style.display = 'none';
-    });
-
-    controls.addEventListener('unlock', () => {
-      document.getElementById('info').style.display = '';
-    });
-
-    scene.add(controls.getObject());
-
-    // 地板
-    const floorTexture = new THREE.TextureLoader().load('https://threejs.org/examples/textures/grasslight-big.jpg');
-    floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
-    floorTexture.repeat.set(25, 25);
-
-    const floorMaterial = new THREE.MeshPhongMaterial({ map: floorTexture });
-    const floorGeometry = new THREE.PlaneGeometry(500, 500);
-    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-    floor.rotation.x = - Math.PI / 2;
-    floor.receiveShadow = true;
-    scene.add(floor);
-
-    // 牆壁
-    const wallTexture = new THREE.TextureLoader().load('https://threejs.org/examples/textures/brick_diffuse.jpg');
-    wallTexture.wrapS = wallTexture.wrapT = THREE.RepeatWrapping;
-    wallTexture.repeat.set(10, 2);
-    const wallMaterial = new THREE.MeshPhongMaterial({ map: wallTexture });
-
-    const wallThickness = 2;
-    const wallHeight = 20;
-    const wallLength = 100;
-
-    function createWall(x, z, width, height) {
-      const geometry = new THREE.BoxGeometry(width, height, wallThickness);
-      const mesh = new THREE.Mesh(geometry, wallMaterial);
-      mesh.position.set(x, height/2, z);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      scene.add(mesh);
-      objects.push(mesh);
-    }
-
-    createWall(0, -wallLength/2, wallLength, wallHeight);
-    createWall(0, wallLength/2, wallLength, wallHeight);
-    createWall(-wallLength/2, 0, wallThickness, wallHeight);
-    createWall(wallLength/2, 0, wallThickness, wallHeight);
-
-    // 箱子
-    const boxTexture = new THREE.TextureLoader().load('https://threejs.org/examples/textures/crate.gif');
-    const boxMaterial = new THREE.MeshPhongMaterial({ map: boxTexture });
-    const boxGeometry = new THREE.BoxGeometry(5,5,5);
-    const box = new THREE.Mesh(boxGeometry, boxMaterial);
-    box.position.set(10, 2.5, -10);
-    box.name = "crate";
-    scene.add(box);
-    objects.push(box);
-
-    // 其他玩家模型（簡單球）
-    const sphereGeometry = new THREE.SphereGeometry(1.5, 16, 16);
-    const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-    otherPlayerMesh = new THREE.Mesh(sphereGeometry, sphereMaterial);
-    otherPlayerMesh.position.set(0, 2, 0);
-    scene.add(otherPlayerMesh);
-
-    // 鍵盤事件
-    document.addEventListener('keydown', onKeyDown);
-    document.addEventListener('keyup', onKeyUp);
-
-    window.addEventListener('resize', onWindowResize);
-  }
-
-  function onWindowResize(){
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  }
-
-  function onKeyDown(event) {
-    switch(event.code) {
-      case 'ArrowUp':
-      case 'KeyW':
-        moveForward = true;
-        break;
-      case 'ArrowLeft':
-      case 'KeyA':
-        moveLeft = true;
-        break;
-      case 'ArrowDown':
-      case 'KeyS':
-        moveBackward = true;
-        break;
-      case 'ArrowRight':
-      case 'KeyD':
-        moveRight = true;
-        break;
-      case 'Space':
-        velocity.y = 10; // 無限跳
-        break;
-      case 'KeyE':
-        interact();
-        break;
-    }
-  }
-
-  function onKeyUp(event) {
-    switch(event.code) {
-      case 'ArrowUp':
-      case 'KeyW':
-        moveForward = false;
-        break;
-      case 'ArrowLeft':
-      case 'KeyA':
-        moveLeft = false;
-        break;
-      case 'ArrowDown':
-      case 'KeyS':
-        moveBackward = false;
-        break;
-      case 'ArrowRight':
-      case 'KeyD':
-        moveRight = false;
-        break;
-    }
-  }
-
-  function interact() {
-    if (currentInteractObject) {
-      alert(`你觸發了 ${currentInteractObject.name} 的互動！`);
-    }
-  }
-
-  // --- P2P 連線部分 ---
-
-  // 建立 PeerJS 物件，使用簡單ID轉換：用純數字ID
-  // 注意：PeerJS 會自動加前綴，避免衝突
-  // 這裡簡單用 4位數字字串作ID
-
-  let peer, conn;
-  const myIdSpan = document.getElementById('myId');
-  const connectIdInput = document.getElementById('connectIdInput');
-  const connectBtn = document.getElementById('connectBtn');
-  const statusDiv = document.getElementById('status');
-
-  function generateRandomId(){
-    return String(Math.floor(1000 + Math.random()*9000)); // 4位純數字ID
-  }
-
-  function initPeer(){
-    // 生成ID
-    const myId = generateRandomId();
-    myIdSpan.innerText = myId;
-
-    // 建立Peer
-    peer = new Peer(myId, {
-      host: 'peerjs.com', // 公共服務器，或你自己架設的
-      port: 443,
-      secure: true
-    });
-
-    peer.on('open', id => {
-      console.log('Peer ID: ' + id);
-      statusDiv.innerText = '等待連線... (你的ID:'+id+')';
-    });
-
-    peer.on('connection', c => {
-      if (conn && conn.open) {
-        // 已經有連線了，拒絕新連線
-        c.on('open', () => {
-          c.send('已有玩家連線');
-          setTimeout(() => c.close(), 500);
-        });
-        return;
-      }
-      conn = c;
-      setupConnection();
-    });
-
-    peer.on('error', err => {
-      console.error(err);
-      alert('Peer錯誤: ' + err);
-    });
-  }
-
-  connectBtn.addEventListener('click', () => {
-    const id = connectIdInput.value.trim();
-    if (!/^\d{4}$/.test(id)) {
-      alert('請輸入4位純數字ID');
-      return;
-    }
-    if (conn && conn.open) {
-      alert('已有連線了');
-      return;
-    }
-    conn = peer.connect(id);
-    conn.on('open', () => {
-      statusDiv.innerText = '已連線到 ' + id;
-      setupConnection();
-    });
-    conn.on('error', err => {
-      alert('連線錯誤: ' + err);
-    });
-  });
-
-  function setupConnection() {
-    statusDiv.innerText = '已連線';
-    conn.on('data', data => {
-      if (data.type === 'pos') {
-        // 收到對方位置
-        const p = data.position;
-        otherPlayerMesh.position.set(p.x, p.y, p.z);
-      }
-    });
-    conn.on('close', () => {
-      statusDiv.innerText = '連線斷開';
-      otherPlayerMesh.position.set(0, -1000, 0); // 讓球消失
-      conn = null;
-    });
-  }
-
-  initPeer();
-
-  // --- 動畫循環 ---
-  function animate() {
-    requestAnimationFrame(animate);
-
-    const time = performance.now();
-    const delta = (time - prevTime) / 1000;
-
-    if (controls.isLocked === true) {
-      velocity.y -= 9.8 * 10.0 * delta;
-
-      direction.z = Number(moveForward) - Number(moveBackward);
-      direction.x = Number(moveRight) - Number(moveLeft);
-      direction.normalize();
-
-      if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
-      if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
-
-      controls.moveRight(- velocity.x * delta);
-      controls.moveForward(- velocity.z * delta);
-
-      controls.getObject().position.y += velocity.y * delta;
-
-      if (controls.getObject().position.y < 2) {
-        velocity.y = 0;
-        controls.getObject().position.y = 2;
-        canJump = true;
-      }
-
-      // 互動判斷
-      currentInteractObject = null;
-      interactPrompt.style.display = 'none';
-      const playerPos = controls.getObject().position;
-      for (let obj of objects) {
-        const dist = obj.position.distanceTo(playerPos);
-        if (dist < 5 && obj.name === "crate") {
-          currentInteractObject = obj;
-          interactPrompt.style.display = 'block';
-          break;
+    <script src="https://unpkg.com/ammo.js@1.0.0/builds/ammo.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.165.0/build/three.module.js"
+            }
         }
-      }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
 
-      // 傳送自己位置給對方（位置同步）
-      if (conn && conn.open) {
-        conn.send({
-          type: 'pos',
-          position: {
-            x: playerPos.x,
-            y: playerPos.y,
-            z: playerPos.z
-          }
-        });
-      }
-    }
+        // 宣告全域變數
+        let scene, camera, renderer;
+        let world, rigidBodies = [];
+        let clock = new THREE.Clock();
 
-    velocity.x -= velocity.x * 10.0 * delta;
-    velocity.z -= velocity.z * 10.0 * delta;
+        const GRAVITY = -9.8;
+        const TRANSFORM_AUX = new THREE.Object3D();
 
-    prevTime = time;
+        let playerMesh, playerBody;
+        const keyboardState = {};
+        const mouseState = { x: 0, y: 0, isDown: false };
+        let mouseLookEnabled = false;
 
-    renderer.render(scene, camera);
-  }
+        // 初始化 Three.js 和 Ammo.js
+        window.onload = function() {
+            // Ammo.js 初始化
+            Ammo().then(function(AmmoLib) {
+                Ammo = AmmoLib;
+                init();
+                animate();
+            });
+        };
 
-  // 渲染器設定放這
-  renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.shadowMap.enabled = true;
-  document.body.appendChild(renderer.domElement);
-</script>
+        function init() {
+            // 建立 Three.js 場景、相機、渲染器
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 15);
+            camera.lookAt(0, 2, 0);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // 初始化 Ammo.js 物理世界
+            let collisionConfiguration = new Ammo.btDefaultCollisionConfiguration();
+            let dispatcher = new Ammo.btCollisionDispatcher(collisionConfiguration);
+            let overlappingPairCache = new Ammo.btDbvtBroadphase();
+            let solver = new Ammo.btSequentialImpulseConstraintSolver();
+            world = new Ammo.btDiscreteDynamicsWorld(dispatcher, overlappingPairCache, solver, collisionConfiguration);
+            world.setGravity(new Ammo.btVector3(0, GRAVITY, 0));
+
+            // 加入光源
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(5, 10, 5);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+
+            // 建立場景物體
+            createGround();
+            createPlayer();
+            createWalls();
+            
+            // 監聽輸入事件
+            setupInputListeners();
+        }
+
+        // 建立地面
+        function createGround() {
+            const groundWidth = 50, groundDepth = 50, groundHeight = 1;
+            const groundGeometry = new THREE.BoxGeometry(groundWidth, groundHeight, groundDepth);
+            const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x228b22 });
+            const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
+            groundMesh.position.y = -groundHeight / 2;
+            groundMesh.receiveShadow = true;
+            scene.add(groundMesh);
+            
+            const groundShape = new Ammo.btBoxShape(new Ammo.btVector3(groundWidth / 2, groundHeight / 2, groundDepth / 2));
+            const groundTransform = new Ammo.btTransform();
+            groundTransform.setIdentity();
+            groundTransform.setOrigin(new Ammo.btVector3(groundMesh.position.x, groundMesh.position.y, groundMesh.position.z));
+            const groundMass = 0;
+            const localInertia = new Ammo.btVector3(0, 0, 0);
+            const motionState = new Ammo.btDefaultMotionState(groundTransform);
+            const rigidBodyInfo = new Ammo.btRigidBodyConstructionInfo(groundMass, motionState, groundShape, localInertia);
+            const groundBody = new Ammo.btRigidBody(rigidBodyInfo);
+            world.addRigidBody(groundBody);
+        }
+
+        // 建立玩家控制的方塊
+        function createPlayer() {
+            const playerSize = 2;
+            const playerGeometry = new THREE.BoxGeometry(playerSize, playerSize, playerSize);
+            const playerMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+            playerMesh = new THREE.Mesh(playerGeometry, playerMaterial);
+            playerMesh.position.set(0, 5, 0);
+            playerMesh.castShadow = true;
+            scene.add(playerMesh);
+
+            const playerShape = new Ammo.btBoxShape(new Ammo.btVector3(playerSize / 2, playerSize / 2, playerSize / 2));
+            const playerTransform = new Ammo.btTransform();
+            playerTransform.setIdentity();
+            playerTransform.setOrigin(new Ammo.btVector3(playerMesh.position.x, playerMesh.position.y, playerMesh.position.z));
+
+            const playerMass = 100;
+            const localInertia = new Ammo.btVector3(0, 0, 0);
+            playerShape.calculateLocalInertia(playerMass, localInertia);
+            const motionState = new Ammo.btDefaultMotionState(playerTransform);
+            const rigidBodyInfo = new Ammo.btRigidBodyConstructionInfo(playerMass, motionState, playerShape, localInertia);
+            playerBody = new Ammo.btRigidBody(rigidBodyInfo);
+            playerBody.setAngularFactor(new Ammo.btVector3(0, 0, 0));
+            playerBody.setFriction(0.5);
+
+            world.addRigidBody(playerBody);
+            rigidBodies.push({ mesh: playerMesh, body: playerBody });
+        }
+        
+        // 建立一道牆壁
+        function createWalls() {
+            const wallWidth = 20, wallHeight = 5, wallDepth = 2;
+            const wallGeometry = new THREE.BoxGeometry(wallWidth, wallHeight, wallDepth);
+            const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x0000ff });
+            const wallMesh = new THREE.Mesh(wallGeometry, wallMaterial);
+            wallMesh.position.set(0, 2.5, -15);
+            wallMesh.castShadow = true;
+            scene.add(wallMesh);
+            
+            const wallShape = new Ammo.btBoxShape(new Ammo.btVector3(wallWidth / 2, wallHeight / 2, wallDepth / 2));
+            const wallTransform = new Ammo.btTransform();
+            wallTransform.setIdentity();
+            wallTransform.setOrigin(new Ammo.btVector3(wallMesh.position.x, wallMesh.position.y, wallMesh.position.z));
+            const wallMass = 0; // 靜止不動
+            const localInertia = new Ammo.btVector3(0, 0, 0);
+            const motionState = new Ammo.btDefaultMotionState(wallTransform);
+            const rigidBodyInfo = new Ammo.btRigidBodyConstructionInfo(wallMass, motionState, wallShape, localInertia);
+            const wallBody = new Ammo.btRigidBody(rigidBodyInfo);
+            world.addRigidBody(wallBody);
+            rigidBodies.push({ mesh: wallMesh, body: wallBody });
+        }
+        
+        // 設定輸入監聽器
+        function setupInputListeners() {
+            // 鍵盤輸入
+            document.addEventListener('keydown', (event) => keyboardState[event.key.toLowerCase()] = true);
+            document.addEventListener('keyup', (event) => keyboardState[event.key.toLowerCase()] = false);
+
+            // 滑鼠控制視角
+            renderer.domElement.addEventListener('mousedown', () => {
+                mouseState.isDown = true;
+                mouseLookEnabled = true;
+                renderer.domElement.requestPointerLock(); // 鎖定滑鼠指標
+            });
+            renderer.domElement.addEventListener('mouseup', () => mouseState.isDown = false);
+            document.addEventListener('mousemove', (event) => {
+                if (mouseLookEnabled) {
+                    mouseState.x += event.movementX * 0.002;
+                    mouseState.y += event.movementY * 0.002;
+                    mouseState.y = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, mouseState.y)); // 限制上下視角
+                }
+            });
+
+            // 處理視窗大小改變
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        // 更新玩家輸入
+        function updateInput() {
+            const moveDirection = new THREE.Vector3();
+            const moveSpeed = 100;
+
+            const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+            const gamepad = gamepads[0];
+            
+            if (gamepad) {
+                // 手柄左搖桿移動
+                const xAxis = gamepad.axes[0];
+                const yAxis = gamepad.axes[1];
+                if (Math.abs(xAxis) > 0.1) moveDirection.x = xAxis;
+                if (Math.abs(yAxis) > 0.1) moveDirection.z = yAxis;
+
+                // 手柄右搖桿控制視角
+                const lookX = gamepad.axes[2];
+                const lookY = gamepad.axes[3];
+                if (Math.abs(lookX) > 0.1) mouseState.x += lookX * 0.02;
+                if (Math.abs(lookY) > 0.1) mouseState.y -= lookY * 0.02;
+                mouseState.y = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, mouseState.y));
+
+            } else {
+                // 鍵盤移動
+                if (keyboardState['w']) moveDirection.z = -1;
+                if (keyboardState['s']) moveDirection.z = 1;
+                if (keyboardState['a']) moveDirection.x = -1;
+                if (keyboardState['d']) moveDirection.x = 1;
+            }
+
+            // 應用移動力道
+            if (playerBody && (moveDirection.x !== 0 || moveDirection.z !== 0)) {
+                moveDirection.normalize().multiplyScalar(moveSpeed);
+                const force = new Ammo.btVector3(moveDirection.x, 0, moveDirection.z);
+                playerBody.activate(true);
+                playerBody.applyCentralForce(force);
+            }
+        }
+        
+        // 遊戲主迴圈
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            // 更新物理世界
+            world.stepSimulation(delta, 10);
+
+            // 更新玩家輸入
+            updateInput();
+
+            // 同步 Ammo 物體與 Three.js 物體
+            for (let i = 0; i < rigidBodies.length; i++) {
+                const objThree = rigidBodies[i].mesh;
+                const objAmmo = rigidBodies[i].body;
+                
+                let motionState = objAmmo.getMotionState();
+                if (motionState) {
+                    motionState.getWorldTransform(TRANSFORM_AUX);
+                    const p = TRANSFORM_AUX.getOrigin();
+                    const q = TRANSFORM_AUX.getRotation();
+                    objThree.position.set(p.x(), p.y(), p.z());
+                    objThree.quaternion.set(q.x(), q.y(), q.z(), q.w());
+                }
+            }
+
+            // 更新相機位置與視角
+            if (playerMesh) {
+                const playerPos = playerMesh.position;
+                const distance = 10;
+                const height = 5;
+
+                // 更新相機角度
+                camera.rotation.set(mouseState.y, mouseState.x, 0, 'YXZ');
+                
+                // 追蹤玩家的相機位置
+                const cameraOffset = new THREE.Vector3(0, height, distance).applyEuler(camera.rotation);
+                camera.position.copy(playerPos).add(cameraOffset);
+            }
+
+            renderer.render(scene, camera);
+        }
+    </script>
 </body>
 </html>
