@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>第一人稱無限跳躍＋物品撿取示範</title>
+<title>精緻第一人稱無限跳躍＋物品撿取示範</title>
 <style>
   body { margin: 0; overflow: hidden; background: #222; color:#eee; font-family: monospace;}
   #inventory {
@@ -42,31 +42,83 @@
 
   // three.js 初始化
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x444444);
 
-  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-  camera.position.set(0, 1.7, 5);
+  // 載入貼圖
+  const loader = new THREE.TextureLoader();
+  const floorTexture = loader.load('https://threejs.org/examples/textures/wood.jpg');
+  floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
+  floorTexture.repeat.set(10, 10);
 
-  const renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
+  const wallTexture = loader.load('https://threejs.org/examples/textures/brick_diffuse.jpg');
+  wallTexture.wrapS = wallTexture.wrapT = THREE.RepeatWrapping;
+  wallTexture.repeat.set(4, 2);
+
+  const boxTexture = loader.load('https://threejs.org/examples/textures/crate.gif');
 
   // 地板
-  const floorGeo = new THREE.PlaneGeometry(50,50);
-  const floorMat = new THREE.MeshStandardMaterial({color:0x777777});
+  const floorMat = new THREE.MeshStandardMaterial({ map: floorTexture });
+  const floorGeo = new THREE.PlaneGeometry(50, 50, 10, 10);
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI/2;
   floor.receiveShadow = true;
   scene.add(floor);
 
-  // 燈光
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+  // 四面牆
+  function createWall(posX, posY, posZ, width, height, depth){
+    const geo = new THREE.BoxGeometry(width, height, depth);
+    const mat = new THREE.MeshStandardMaterial({ map: wallTexture });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(posX, posY, posZ);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    return mesh;
+  }
+  createWall(0,2.5,-25, 50, 5, 1); // 前牆
+  createWall(0,2.5,25, 50, 5, 1);  // 後牆
+  createWall(-25,2.5,0, 1, 5, 50); // 左牆
+  createWall(25,2.5,0, 1, 5, 50);  // 右牆
+
+  // 幾個箱子
+  function createBox(posX, posY, posZ){
+    const geo = new THREE.BoxGeometry(2, 2, 2);
+    const mat = new THREE.MeshStandardMaterial({ map: boxTexture });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(posX, posY, posZ);
+    mesh.castShadow = true;
+    scene.add(mesh);
+    return mesh;
+  }
+  createBox(5,1,5);
+  createBox(-5,1,-5);
+  createBox(8,1,-8);
+
+  // 環境光和方向光（有陰影）
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
-  const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
-  dirLight.position.set(5,10,7);
+
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+  dirLight.position.set(10, 20, 10);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.width = 1024;
+  dirLight.shadow.mapSize.height = 1024;
+  dirLight.shadow.camera.left = -30;
+  dirLight.shadow.camera.right = 30;
+  dirLight.shadow.camera.top = 30;
+  dirLight.shadow.camera.bottom = -30;
   scene.add(dirLight);
 
-  // 玩家物件
+  // 相機與渲染器
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 1.7, 5);
+
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  // 玩家狀態
   const player = {
     pos: new THREE.Vector3(0, 1.7, 5),
     vel: new THREE.Vector3(0, 0, 0),
@@ -135,6 +187,7 @@
       const mat = new THREE.MeshStandardMaterial({color: 0xffaa00});
       this.mesh = new THREE.Mesh(geo, mat);
       this.mesh.position.copy(this.pos);
+      this.mesh.castShadow = true;
       scene.add(this.mesh);
 
       this.picked = false;
