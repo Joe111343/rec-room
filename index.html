@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>3D P2P 雙人示範（非模組版）</title>
+<title>3D P2P雙人表情同步示範</title>
 <style>
   body { margin:0; overflow:hidden; background:#222; color:#eee; font-family: monospace; }
   #peerID {
@@ -39,28 +39,29 @@
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/loaders/GLTFLoader.js"></script>
 
 <script>
-  // 生成5位數隨機ID
+  // PeerJS 5位ID產生器
   function generateRandomID() {
     return Math.floor(10000 + Math.random() * 90000).toString();
   }
 
   let peer, conn;
-  let scene, camera, renderer;
-  let player, remotePlayer;
+  let scene, camera, renderer, clock;
+  let mixer, model, remoteModel;
+  let morphCount = 0;
+  let morphIndex = 0;
+  let remoteMorphIndex = 0;
   let keys = {};
   let yaw = 0, pitch = 0;
-  let velocity = {x:0, y:0, z:0};
-  let onGround = true;
-  let clock = new THREE.Clock();
-  let cameraMode = 'third'; // first or third
+  let velocity = new THREE.Vector3();
+  let speed = 5;
 
-  // 初始化 PeerJS
+  // 初始化PeerJS
   function setupPeer(){
     const myId = generateRandomID();
     peer = new Peer(myId, { debug: 2 });
-
     peer.on('open', id => {
       document.getElementById('peerID').textContent = '我的ID: ' + id;
     });
@@ -73,20 +74,25 @@
       bindConnection();
     });
   }
+
   function bindConnection(){
     document.getElementById('connStatus').textContent = '已連線: ' + conn.peer;
     conn.on('data', data => {
+      if(!remoteModel) return;
       if(data.type === 'posRot'){
-        remotePlayer.position.set(data.pos.x, data.pos.y, data.pos.z);
-        remotePlayer.rotation.y = data.rotY;
-        remotePlayer.visible = true;
+        remoteModel.position.set(data.pos.x, data.pos.y, data.pos.z);
+        remoteModel.rotation.y = data.rotY;
+      } else if(data.type === 'morph'){
+        remoteMorphIndex = data.morphIndex;
+        updateMorphTargets(remoteModel, remoteMorphIndex);
       }
     });
     conn.on('close', () => {
       document.getElementById('connStatus').textContent = '連線已斷開';
-      remotePlayer.visible = false;
+      if(remoteModel) remoteModel.visible = false;
     });
   }
+
   document.getElementById('connectBtn').onclick = () => {
     if(conn) conn.close();
     const targetID = document.getElementById('connectInput').value.trim();
@@ -99,58 +105,79 @@
       document.getElementById('connStatus').textContent = '已連線: ' + conn.peer;
     });
     conn.on('data', data => {
+      if(!remoteModel) return;
       if(data.type === 'posRot'){
-        remotePlayer.position.set(data.pos.x, data.pos.y, data.pos.z);
-        remotePlayer.rotation.y = data.rotY;
-        remotePlayer.visible = true;
+        remoteModel.position.set(data.pos.x, data.pos.y, data.pos.z);
+        remoteModel.rotation.y = data.rotY;
+      } else if(data.type === 'morph'){
+        remoteMorphIndex = data.morphIndex;
+        updateMorphTargets(remoteModel, remoteMorphIndex);
       }
     });
     conn.on('close', () => {
       document.getElementById('connStatus').textContent = '連線已斷開';
-      remotePlayer.visible = false;
+      if(remoteModel) remoteModel.visible = false;
     });
   };
 
-  // Three.js 初始化
+  // Three.js初始化
   function initThree(){
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x222222);
 
     camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 1.6, 3);
 
     renderer = new THREE.WebGLRenderer({antialias:true});
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
+    const ambientLight = new THREE.AmbientLight(0x666666);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(10, 20, 10);
+    scene.add(dirLight);
+
     // 地板
     const floorGeo = new THREE.PlaneGeometry(50, 50);
-    const floorMat = new THREE.MeshPhongMaterial({color:0x444444});
+    const floorMat = new THREE.MeshPhongMaterial({color: 0x444444});
     const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI/2;
+    floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // 光源
-    const ambientLight = new THREE.AmbientLight(0x666666);
-    scene.add(ambientLight);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(10,20,10);
-    scene.add(dirLight);
+    // 玩家（自己）
+    loadModel().then(gltf => {
+      model = gltf.scene;
+      model.position.set(0, 0, 0);
+      scene.add(model);
 
-    // 玩家 (綠色方塊)
-    const playerGeo = new THREE.BoxGeometry(1, 2, 1);
-    const playerMat = new THREE.MeshPhongMaterial({color:0x00ff00});
-    player = new THREE.Mesh(playerGeo, playerMat);
-    player.position.y = 1;
-    scene.add(player);
+      morphCount = 0;
+      model.traverse(child => {
+        if(child.isMesh){
+          morphCount = child.morphTargetInfluences.length;
+          child.morphTargetInfluences = child.morphTargetInfluences || [];
+        }
+      });
 
-    // 遠端玩家 (藍色方塊)
-    const remoteGeo = new THREE.BoxGeometry(1, 2, 1);
-    const remoteMat = new THREE.MeshPhongMaterial({color:0x0000ff});
-    remotePlayer = new THREE.Mesh(remoteGeo, remoteMat);
-    remotePlayer.position.y = 1;
-    remotePlayer.visible = false;
-    scene.add(remotePlayer);
+      mixer = new THREE.AnimationMixer(model);
+      updateMorphTargets(model, morphIndex);
+    });
+
+    // 遠端玩家
+    loadModel().then(gltf => {
+      remoteModel = gltf.scene;
+      remoteModel.position.set(2, 0, 0);
+      scene.add(remoteModel);
+
+      remoteModel.traverse(child => {
+        if(child.isMesh){
+          child.morphTargetInfluences = child.morphTargetInfluences || [];
+        }
+      });
+      remoteModel.visible = false;
+    });
 
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth/window.innerHeight;
@@ -158,13 +185,12 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // 鎖定滑鼠並控制視角
+    // 滑鼠鎖定
     document.body.addEventListener('click', () => {
       if(document.pointerLockElement !== renderer.domElement){
         renderer.domElement.requestPointerLock();
       }
     });
-
     document.addEventListener('pointerlockchange', () => {
       if(document.pointerLockElement === renderer.domElement){
         document.addEventListener('mousemove', onMouseMove);
@@ -177,8 +203,42 @@
     window.addEventListener('keydown', e => { keys[e.code] = true; });
     window.addEventListener('keyup', e => { keys[e.code] = false; });
 
+    // 點擊切換表情
+    window.addEventListener('dblclick', () => {
+      morphIndex = (morphIndex + 1) % morphCount;
+      updateMorphTargets(model, morphIndex);
+      // 同步表情給對方
+      if(conn && conn.open){
+        conn.send({type:'morph', morphIndex});
+      }
+    });
   }
 
+  // 載入外部GLTF模型函式（LittlestTokyo）
+  function loadModel(){
+    return new Promise((resolve, reject) => {
+      const loader = new THREE.GLTFLoader();
+      loader.load(
+        'https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/models/gltf/LittlestTokyo/LittlestTokyo.glb',
+        gltf => resolve(gltf),
+        undefined,
+        err => reject(err)
+      );
+    });
+  }
+
+  // 設定Morph Targets顯示
+  function updateMorphTargets(obj, index){
+    obj.traverse(child => {
+      if(child.isMesh && child.morphTargetInfluences){
+        for(let i=0; i < child.morphTargetInfluences.length; i++){
+          child.morphTargetInfluences[i] = (i === index) ? 1 : 0;
+        }
+      }
+    });
+  }
+
+  // 控制視角
   function onMouseMove(e){
     const sensitivity = 0.002;
     yaw -= e.movementX * sensitivity;
@@ -189,8 +249,9 @@
   // 遊戲主迴圈
   function animate(){
     requestAnimationFrame(animate);
-
     const dt = clock.getDelta();
+
+    if(!model) return;
 
     // 移動控制
     let moveDir = new THREE.Vector3();
@@ -200,69 +261,47 @@
     if(keys['KeyD']) moveDir.x += 1;
     moveDir.normalize();
 
-    let speed = 5;
-
-    // 用yaw計算方向向量
     let forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
     let right = new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0), forward);
 
-    let velocity = new THREE.Vector3();
+    velocity.set(0, 0, 0);
     velocity.addScaledVector(forward, moveDir.z * speed);
     velocity.addScaledVector(right, moveDir.x * speed);
 
-    player.position.addScaledVector(velocity, dt);
+    model.position.addScaledVector(velocity, dt);
+    model.rotation.y = yaw;
 
-    // 簡單重力
-    player.position.y -= 9.8 * dt;
-    if(player.position.y < 1){
-      player.position.y = 1;
-    }
+    // 相機（第一人稱固定頭部高度）
+    camera.position.copy(model.position);
+    camera.position.y += 1.6;
 
-    player.rotation.y = yaw;
+    const lookDir = new THREE.Vector3(
+      Math.sin(yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(yaw) * Math.cos(pitch)
+    );
+    camera.lookAt(camera.position.clone().add(lookDir));
 
-    // 相機
-    if(cameraMode === 'first'){
-      camera.position.copy(player.position);
-      camera.position.y += 1.6;
-      const lookDir = new THREE.Vector3(
-        Math.sin(yaw) * Math.cos(pitch),
-        Math.sin(pitch),
-        Math.cos(yaw) * Math.cos(pitch)
-      );
-      camera.lookAt(camera.position.clone().add(lookDir));
-    } else {
-      // 第三人稱
-      const offsetBack = 5;
-      const offsetUp = 2;
-      camera.position.set(
-        player.position.x - Math.sin(yaw)*offsetBack,
-        player.position.y + offsetUp,
-        player.position.z - Math.cos(yaw)*offsetBack
-      );
-      camera.lookAt(player.position.x, player.position.y + 1, player.position.z);
-    }
-
-    // 傳送玩家位置
+    // 傳送位置旋轉
     if(conn && conn.open){
       conn.send({
         type: 'posRot',
-        pos: player.position,
+        pos: model.position,
         rotY: yaw
       });
     }
+
+    // 更新動畫（如果有）
+    if(mixer) mixer.update(dt);
 
     renderer.render(scene, camera);
   }
 
   window.onload = () => {
+    clock = new THREE.Clock();
     initThree();
     setupPeer();
     animate();
-
-    window.addEventListener('keydown', e => {
-      if(e.code === 'Digit1') cameraMode = 'first';
-      if(e.code === 'Digit3') cameraMode = 'third';
-    });
   };
 </script>
 
