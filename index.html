@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>多人 P2P 3D + 語音 (ES Module)</title>
+<title>多人 P2P 3D + 語音 (可跑版)</title>
 <style>
   body { margin: 0; overflow: hidden; }
   #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(255,255,255,0.8); padding: 10px; border-radius: 5px;}
@@ -17,10 +17,12 @@
   <button id="connectBtn">連線</button>
 </div>
 
+<!-- PeerJS UMD 版 -->
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
-import { PointerLockControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/PointerLockControls.js';
-import Peer from 'https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.mjs';
+import { PointerLockControls } from 'https://threejs.org/examples/jsm/controls/PointerLockControls.js';
 
 let scene, camera, renderer, controls;
 let localPlayer, players = {};
