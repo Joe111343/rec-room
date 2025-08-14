@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>多人 P2P 3D + 語音 (瀏覽器可跑版)</title>
+<title>多人 P2P 3D + 語音 (ES Module)</title>
 <style>
   body { margin: 0; overflow: hidden; }
   #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(255,255,255,0.8); padding: 10px; border-radius: 5px;}
@@ -17,15 +17,13 @@
   <button id="connectBtn">連線</button>
 </div>
 
-<!-- Three.js UMD -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/PointerLockControls.js"></script>
-
 <!-- PeerJS UMD -->
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
 
-<script>
-// 變數
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import { PointerLockControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/PointerLockControls.js';
+
 let scene, camera, renderer, controls;
 let localPlayer, players = {};
 let move = {forward:0, right:0, up:0};
@@ -84,7 +82,7 @@ localPlayer = createPlayer(0x0000ff);
 camera.position.set(0,2,5);
 
 // 控制器
-controls = new THREE.PointerLockControls(camera, document.body);
+controls = new PointerLockControls(camera, document.body);
 document.addEventListener('click',()=>{controls.lock()});
 
 // 鍵盤控制
