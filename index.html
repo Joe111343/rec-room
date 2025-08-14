@@ -2,172 +2,211 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>P2P 多人 3D + 語音</title>
+<title>P2P 多人第三人稱遊戲</title>
 <style>
-body { margin:0; overflow:hidden; background:#000; }
-#ui {
-  position:absolute; top:10px; left:10px; z-index:10;
-  background:rgba(255,255,255,0.85); padding:10px; border-radius:5px;
-}
+  body { margin:0; overflow:hidden; background:#000; }
+  #info {
+    position: absolute; top: 10px; left: 10px; color: white;
+    font-family: sans-serif; font-size: 14px;
+  }
 </style>
 </head>
 <body>
-<div id="ui">
-  <button id="startBtn">啟動 P2P</button>
-  <input type="text" id="peerIdInput" placeholder="輸入對方ID">
+<div id="info">
+  <p>WASD 移動，空白鍵上升，方向鍵旋轉，手柄也支援</p>
+  <p>輸入對方 ID 連線：</p>
+  <input id="peerId" placeholder="對方 ID">
   <button id="connectBtn">連線</button>
+  <p>你的 ID：<span id="myId"></span></p>
 </div>
-
-<!-- PeerJS 直接 CDN -->
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
 
 <script type="module">
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import { PointerLockControls } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/PointerLockControls.js";
+import { Peer } from "https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js";
 
-// === 基本場景 ===
+// === 建立場景 ===
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB);
+scene.background = new THREE.Color(0xa0d0ff);
 
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
-
-const light = new THREE.DirectionalLight(0xffffff,1);
-light.position.set(10,20,10);
-scene.add(light);
-scene.add(new THREE.AmbientLight(0xffffff,0.5));
-
-const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(500,500),
-  new THREE.MeshStandardMaterial({color:0x228B22})
-);
+// 簡單地板
+const floorGeo = new THREE.PlaneGeometry(100, 100);
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x00aa00 });
+const floor = new THREE.Mesh(floorGeo, floorMat);
 floor.rotation.x = -Math.PI/2;
+floor.receiveShadow = true;
 scene.add(floor);
 
-// === 建立角色 ===
-function createPlayer(color=0xff0000){
-    const group = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1,2,0.5), new THREE.MeshStandardMaterial({color}));
-    body.position.y=1; group.add(body);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.8,0.8,0.8), new THREE.MeshStandardMaterial({color}));
-    head.position.y=2.6; group.add(head);
-    const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.3,1,0.3), new THREE.MeshStandardMaterial({color}));
-    leftArm.position.set(-0.65,1.5,0); group.add(leftArm);
-    const rightArm = leftArm.clone(); rightArm.position.x=0.65; group.add(rightArm);
-    const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4,1,0.4), new THREE.MeshStandardMaterial({color}));
-    leftLeg.position.set(-0.25,0,0); group.add(leftLeg);
-    const rightLeg = leftLeg.clone(); rightLeg.position.x=0.25; group.add(rightLeg);
-    scene.add(group);
-    return group;
+// 燈光
+const light = new THREE.DirectionalLight(0xffffff, 1);
+light.position.set(5,10,7);
+scene.add(light);
+scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+
+// === 相機 & 渲染器 ===
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// === 玩家系統 ===
+function createPlayer(color){
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({color});
+  const limbGeo = new THREE.BoxGeometry(0.5, 1.5, 0.5);
+  const bodyGeo = new THREE.BoxGeometry(1, 2, 0.5);
+  const headGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+
+  const body = new THREE.Mesh(bodyGeo, mat);
+  body.position.y = 1;
+  group.add(body);
+
+  const head = new THREE.Mesh(headGeo, mat);
+  head.position.y = 2.2;
+  group.add(head);
+
+  const leftArm = new THREE.Mesh(limbGeo, mat);
+  leftArm.position.set(-0.9, 1.2, 0);
+  group.add(leftArm);
+
+  const rightArm = new THREE.Mesh(limbGeo, mat);
+  rightArm.position.set(0.9, 1.2, 0);
+  group.add(rightArm);
+
+  const leftLeg = new THREE.Mesh(limbGeo, mat);
+  leftLeg.position.set(-0.3, -0.3, 0);
+  group.add(leftLeg);
+
+  const rightLeg = new THREE.Mesh(limbGeo, mat);
+  rightLeg.position.set(0.3, -0.3, 0);
+  group.add(rightLeg);
+
+  return group;
 }
 
 const localPlayer = createPlayer(0x0000ff);
-camera.position.set(0,2,5);
+scene.add(localPlayer);
+
+const remotePlayers = new Map();
 
 // === 控制 ===
-const controls = new PointerLockControls(camera, document.body);
-document.addEventListener('click',()=>controls.lock());
-
-const move = {forward:0, right:0, up:0};
+const move = {forward:0, right:0, up:0, rotY:0};
 const velocity = 0.1;
 
 document.addEventListener('keydown', e=>{
-    if(e.key==='w') move.forward=1;
-    if(e.key==='s') move.forward=-1;
-    if(e.key==='a') move.right=-1;
-    if(e.key==='d') move.right=1;
-    if(e.key===' ') move.up=1;
+  if(e.code==="KeyW") move.forward=1;
+  if(e.code==="KeyS") move.forward=-1;
+  if(e.code==="KeyA") move.right=-1;
+  if(e.code==="KeyD") move.right=1;
+  if(e.code==="Space") move.up=0.1;
+  if(e.code==="ArrowLeft") move.rotY=0.05;
+  if(e.code==="ArrowRight") move.rotY=-0.05;
 });
 document.addEventListener('keyup', e=>{
-    if(e.key==='w'||e.key==='s') move.forward=0;
-    if(e.key==='a'||e.key==='d') move.right=0;
-    if(e.key===' ') move.up=0;
+  if(e.code==="KeyW"||e.code==="KeyS") move.forward=0;
+  if(e.code==="KeyA"||e.code==="KeyD") move.right=0;
+  if(e.code==="Space") move.up=0;
+  if(e.code==="ArrowLeft"||e.code==="ArrowRight") move.rotY=0;
 });
 
-// 手柄支援
+// 手柄控制
 function handleGamepad(){
-    const pads = navigator.getGamepads();
-    for(const pad of pads){
-        if(!pad) continue;
-        move.forward = -pad.axes[1];
-        move.right = pad.axes[0];
-    }
+  const pads = navigator.getGamepads();
+  if(pads[0]){
+    const gp = pads[0];
+    move.right = gp.axes[0];
+    move.forward = -gp.axes[1];
+    if(gp.buttons[0].pressed) move.up = 0.1; else move.up = 0;
+    move.rotY = gp.axes[2]*0.05;
+  }
 }
 
 // === P2P ===
-let peer, conn, localStream;
-const players = {};
+const peer = new Peer();
+let conn = null;
 
-document.getElementById('startBtn').onclick = async ()=>{
-    localStream = await navigator.mediaDevices.getUserMedia({audio:true});
-    peer = new Peer();
-    peer.on('open', id=>alert('你的ID: '+id));
-    peer.on('connection', c=>{
-        conn = c;
-        conn.on('data', handleData);
-    });
-    peer.on('call', call=>{
-        call.answer(localStream);
-        const audio = document.createElement('audio');
-        audio.autoplay = true;
-        call.on('stream', stream => audio.srcObject = stream);
-        document.body.appendChild(audio);
-    });
-};
+peer.on('open', id=>{
+  document.getElementById('myId').textContent = id;
+});
 
 document.getElementById('connectBtn').onclick = ()=>{
-    const id = document.getElementById('peerIdInput').value;
-    conn = peer.connect(id);
-    conn.on('open', ()=>console.log('資料連線成功'));
-    conn.on('data', handleData);
-    const call = peer.call(id, localStream);
-    const audio = document.createElement('audio');
-    audio.autoplay = true;
-    call.on('stream', stream => audio.srcObject = stream);
-    document.body.appendChild(audio);
+  const targetId = document.getElementById('peerId').value;
+  conn = peer.connect(targetId);
+  conn.on('data', onData);
 };
 
-function handleData(data){
-    const {id,pos,rot} = data;
-    if(!players[id]) players[id] = createPlayer(0xff0000);
-    players[id].position.set(pos.x,pos.y,pos.z);
-    players[id].rotation.set(rot._x,rot._y,rot._z);
-}
+peer.on('connection', c=>{
+  conn = c;
+  conn.on('data', onData);
+});
 
-function sendData(){
-    if(conn && conn.open && peer){
-        conn.send({id:peer.id,pos:localPlayer.position,rot:localPlayer.rotation});
+function onData(data){
+  if(data.type==='pos'){
+    let p = remotePlayers.get(data.id);
+    if(!p){
+      p = createPlayer(0xff0000);
+      scene.add(p);
+      remotePlayers.set(data.id, p);
     }
+    p.position.copy(data.pos);
+    p.rotation.y = data.rot;
+  }
 }
 
-// === 更新 ===
+// 語音聊天
+navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+  peer.on('call', call=>{
+    call.answer(stream);
+    call.on('stream', remoteStream=>{
+      const audio = document.createElement('audio');
+      audio.srcObject = remoteStream;
+      audio.play();
+    });
+  });
+  document.getElementById('connectBtn').addEventListener('click', ()=>{
+    if(document.getElementById('peerId').value){
+      const call = peer.call(document.getElementById('peerId').value, stream);
+      call.on('stream', remoteStream=>{
+        const audio = document.createElement('audio');
+        audio.srcObject = remoteStream;
+        audio.play();
+      });
+    }
+  });
+});
+
+// === 更新玩家位置 ===
 function updatePlayer(){
-    const dir = new THREE.Vector3();
-    dir.z = -move.forward; dir.x = move.right; dir.normalize();
-    dir.applyEuler(camera.rotation);
-    localPlayer.position.addScaledVector(dir, velocity);
-    if(move.up) localPlayer.position.y += velocity;
+  localPlayer.rotation.y += move.rotY;
+  const dir = new THREE.Vector3(move.right, 0, -move.forward);
+  dir.applyAxisAngle(new THREE.Vector3(0,1,0), localPlayer.rotation.y);
+  localPlayer.position.addScaledVector(dir, velocity);
+  localPlayer.position.y += move.up;
+}
+
+// 發送資料
+function sendData(){
+  if(conn && conn.open){
+    conn.send({type:'pos', id:peer.id, pos:localPlayer.position, rot:localPlayer.rotation.y});
+  }
 }
 
 // === 遊戲迴圈 ===
 function animate(){
-    requestAnimationFrame(animate);
-    handleGamepad();
-    updatePlayer();
-    sendData();
-    camera.position.lerp(localPlayer.position.clone().add(new THREE.Vector3(0,2,5)), 0.1);
-    renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+  handleGamepad();
+  updatePlayer();
+  sendData();
+
+  // 第三人稱相機跟隨
+  const cameraOffset = new THREE.Vector3(0, 3, 6);
+  const cameraPos = localPlayer.position.clone().add(cameraOffset.applyAxisAngle(new THREE.Vector3(0,1,0), localPlayer.rotation.y));
+  camera.position.lerp(cameraPos, 0.1);
+  camera.lookAt(localPlayer.position.clone().add(new THREE.Vector3(0, 1.5, 0)));
+
+  renderer.render(scene, camera);
 }
 animate();
 
-window.addEventListener('resize', ()=>{
-    camera.aspect = window.innerWidth/window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
 </script>
 </body>
 </html>
