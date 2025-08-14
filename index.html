@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
-<title>P2P 多人第三人稱遊戲</title>
+<title>P2P 多人 3D 遊戲（公共 PeerJS）</title>
 <style>
   body { margin:0; overflow:hidden; background:#000; }
   #info {
@@ -20,10 +20,12 @@
   <p>你的 ID：<span id="myId"></span></p>
 </div>
 
-<script type="module">
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import { Peer } from "https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js";
+<!-- Three.js -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<!-- PeerJS -->
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
+<script>
 // === 建立場景 ===
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa0d0ff);
@@ -100,9 +102,10 @@ function handleGamepad(){
 
 // === P2P ===
 const peer = new Peer(undefined, {
-  host: 'peerjs-server.herokuapp.com',
+  host: '0.peerjs.com',
   port: 443,
-  path: '/'
+  path: '/',
+  secure: true
 });
 
 let conn = null;
@@ -143,15 +146,19 @@ navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
     call.on('stream', remoteStream=>{
       const audio = document.createElement('audio');
       audio.srcObject = remoteStream;
+      audio.autoplay = true;
       audio.play();
     });
   });
+
   document.getElementById('connectBtn').addEventListener('click', ()=>{
-    if(document.getElementById('peerId').value){
-      const call = peer.call(document.getElementById('peerId').value, stream);
+    const targetId = document.getElementById('peerId').value;
+    if(targetId){
+      const call = peer.call(targetId, stream);
       call.on('stream', remoteStream=>{
         const audio = document.createElement('audio');
         audio.srcObject = remoteStream;
+        audio.autoplay = true;
         audio.play();
       });
     }
